@@ -9,11 +9,10 @@ Ce premier script permet de préparer et structurer les données DVF en open dat
 --> Access to the <a href="https://github.com/ESO-Rennes/Analyse-Donnees-DVF/blob/main/ScriptDVF1.Rmd" target="_blank" rel="noopener"><strong>R markdown script 1</strong></a>
 
 <br>
-<br>
 
 
 #### Script 2 
-Ce premier script permet de préparer et structurer les données DVF en open data (nettoyage, filtrage, agrégation,...).
+Ce deuxième script permet de produire et de représenter graphiquement sous diverses formes une série d'indicateurs génériques sur le marché immobilier résidentiel
 
 --> Access to the <a href="https://github.com/ESO-Rennes/Analyse-Donnees-DVF/blob/main/ScriptDVF2.Rmd" target="_blank" rel="noopener"><strong>R markdown script 2</strong></a>
 
