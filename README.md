@@ -6,16 +6,16 @@ Auteurs: Boris Mericskay et Florent Demoraes - 2022
 #### Script 1 
 Ce premier script permet de préparer et structurer les données DVF en open data (nettoyage, filtrage, agrégation,...).
 
---> Access to the <a href="https://github.com/ESO-Rennes/Analyse-Donnees-DVF/blob/main/ScriptDVF1.Rmd" target="_blank" rel="noopener"><strong>R markdown script 1</strong></a>
+--> Lien vers le <a href="https://github.com/ESO-Rennes/Analyse-Donnees-DVF/blob/main/ScriptDVF1.Rmd" target="_blank" rel="noopener"><strong>R markdown script 1</strong></a>
 
 
 #### Script 2 
-Ce deuxième script permet de produire et de représenter graphiquement sous diverses formes une série d'indicateurs génériques sur le marché immobilier résidentiel
+Ce deuxième script permet de produire et de représenter graphiquement sous diverses formes une série d'indicateurs génériques sur le marché immobilier résidentiel.
 
---> Access to the <a href="https://github.com/ESO-Rennes/Analyse-Donnees-DVF/blob/main/ScriptDVF2.Rmd" target="_blank" rel="noopener"><strong>R markdown script 2</strong></a>
+--> Lien vers le <a href="https://github.com/ESO-Rennes/Analyse-Donnees-DVF/blob/main/ScriptDVF2.Rmd" target="_blank" rel="noopener"><strong>R markdown script 2</strong></a>
 
 
 #### Script 3
-Ce deuxième script permet de produire et de représenter graphiquement sous diverses formes une série d'indicateurs génériques sur le marché immobilier résidentiel
+Ce troisième script présente toutes les étapes de manipulation de la dimension spatiale des données DVF et propose plusieurs formes de représentation cartographique de ces données à une échelle régionale (Bretagne).
 
---> Access to the <a href="https://github.com/ESO-Rennes/Analyse-Donnees-DVF/blob/main/ScriptDVF3.Rmd" target="_blank" rel="noopener"><strong>R markdown script 3</strong></a>
+--> Lien vers le <a href="https://github.com/ESO-Rennes/Analyse-Donnees-DVF/blob/main/ScriptDVF3.Rmd" target="_blank" rel="noopener"><strong>R markdown script 3</strong></a>
