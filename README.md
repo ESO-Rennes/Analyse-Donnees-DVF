@@ -8,7 +8,7 @@ Ce premier script permet de préparer et structurer les données DVF en open dat
 
 --> Lien vers le <a href="https://github.com/ESO-Rennes/Analyse-Donnees-DVF/blob/main/ScriptDVF1.Rmd" target="_blank" rel="noopener"><strong>R markdown script 1</strong></a>
 
---> Lien vers le <a href="https://htmlpreview.github.io/?https://github.com/ESO-Rennes/Analyse-Donnees-DVF/blob/main/ScriptDVF1.html" target="_blank" rel="noopener"><strong>script 1 mis en page</strong></a>
+--> Lien vers le <a href="https://htmlpreview.github.io/?https://github.com/ESO-Rennes/Analyse-Donnees-DVF/blob/main/ScriptDVF1.html" target="_blank" rel="opener"><strong>script 1 mis en page</strong></a>
 
 
 #### Script 2 
