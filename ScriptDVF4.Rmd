@@ -1,80 +1,81 @@
 ---
-title: "Script 4"
-author: "Boris Mericskay et Florent Demoraes"
-date: "12/11/2021"
-output: html_document
+title: "DVF Script 4"
+author: "[Boris Mericskay](https://perso.univ-rennes2.fr/boris.mericskay) et [Florent Demoraes](https://perso.univ-rennes2.fr/florent.demoraes)"
+date: "02/07/2021"
+output:
+  word_document:
+    toc: yes
+    number_sections: true
+  html_document:
+    toc: yes
+    toc_float:
+      collapsed: yes
+      smooth_scroll: yes
+    number_sections: true
 ---
 
----
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = 'C:/DVF/SIGAT')
+```
 
-LES DONNÉES DVF À UNE ÉCHELLE LOCALE : LES EXEMPLES DE LA MÉTROPOLE RÉGIONALE ET DE LA COMMUNE DE RENNES
-
----
+# LES DONNÉES DVF À UNE ÉCHELLE LOCALE : LES EXEMPLES DE LA MÉTROPOLE RÉGIONALE ET DE LA COMMUNE DE RENNES
 
 Ce script présente toutes les étapes de manipulation de la dimension spatiale des données DVF et propose plusieurs formes de représentation cartographique de ces données à une échelle métropolitaine (Rennes Métropole).
 
 
-## Préparation du projet
+## Chargement des packages nécessaires
 
-### Définition de l'environnement de travail
-
-On définit ici le dossier qui centralise les données et où les différents jeux de données seront exportés
-
-```{r setup, include=FALSE} 
-knitr::opts_knit$set(root.dir = 'C:/DVF')
-knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
-
-```
-### Chargement des packages R nécessaires
-
-
-```{r}
+```{r loading package, warning=FALSE, message = FALSE, error=FALSE, echo=TRUE}
 library(tidyverse) #Manipulation de données
-library(sf) #Manipumation de données spatiales
+library(sf) #Manipulation de données spatiales
 library(cartography) #Cartographie thématique
+library(sp) # pour importer des objets ayant une composante spatiale
+library(rgdal) # pour manipuler des objets ayant une composante spatiale
+library(rgeos) # pour calculer des centroides
+library(spdep) # pour calculer l'auto-corrélation spatiale
+library(geoR) # pour calculer le semi-variogramme empirique
+library(spatstat) # pour produire des surfaces lissées
+library(maptools) # pour le traitement cartographique
+library(raster) # pour le traitement de données matricielles
+library(cluster) # pour la CAH
 ```
 
-### Import du jeu de données brut (si nécessaire)
-```{r}
-DVF <- read.csv("DATA/DVF_brut.csv", encoding="UTF-8", stringsAsFactors=FALSE)
+## Import du jeu de données brut
+```{r Import donnees}
+DVF <- read.csv("DVFOK.csv", encoding="UTF-8", stringsAsFactors=FALSE)
+MutationsBZH <- st_read("MutationsBZH.gpkg")
 ```
 
----
-## 1-Créer le jeu de données correspondant à Rennes métropole (RM)
-
+## Créer le jeu de données correspondant à Rennes métropole (RM)
 
 ### Extraire les mutations de Rennes Métropole
 ```{r}
 MutationsRM <- MutationsBZH %>% filter(EPCI == 'Rennes Métropole')
 ```
 
-### Tableau récapitulatif des indicateurs immobiliers de RM
+### Création d'un tableau avec les indicateurs immobiliers de RM
 
 ```{r}
 RecapRM <- MutationsRM %>% group_by(type) %>% 
   summarise(tot = n (), prixmed = median(prix), prixmoy = mean(prix), surfmed = median(surface), surfmoy = mean(surface), prixm2med = median(prixm2), prixm2moy = mean(prixm2))
-
 RecapRM <- RecapRM %>% mutate(part = (tot/sum(tot)*100))
-
 print(RecapRM)
 ```
 
-
----
-## 2-Exploration des prix et des volumes à l'échelon des IRIS
-
+## Exploration des prix et des volumes à l'échelon des IRIS
 
 ### Importer la couche des IRIS (IGN)
 ```{r}
-IRISRM <- st_read(dsn = "DATA/IRISRM.shp", stringsAsFactors = FALSE)
+IRISRM <- st_read(dsn = "IRISRM.shp", stringsAsFactors = FALSE)
 plot(IRISRM["ccom"])
 ```
 
 ### Calculer et cartographier le prix moyen au m² par IRIS
 
 ```{r}
-# Réimporter si nécessaire la couche des communes de Bretagne (Admin Express IGN) et la reprojeter
-Communes <- st_read(dsn = "DATA/Communes.shp", stringsAsFactors = FALSE)
+# Réimporter si nécessaire la couche des communes de Bretagne (Admin Express IGN)
+Communes <- st_read(dsn = "Communes.shp", stringsAsFactors = FALSE)
 
 # Calcul du prix moyen au m² par IRIS
 IRISDVF <- IRISRM %>% st_join(MutationsRM) %>% group_by(code_iris) %>% summarise(Prixm2 = mean(prixm2))
@@ -161,14 +162,12 @@ labelLayer(Selection_Communes_RM, txt = "NOM_COM", halo = TRUE, bg = "white", r 
 ```
 
 
----
-## 3-Exploration des prix et des volumes à l'échelon des sections cadastrales
-
+## Exploration des prix et des volumes à l'échelon des sections cadastrales
 
 ### Importer la couche des sections cadastrales (DGFip)
 
 ```{r}
-Sections <- st_read(dsn = "DATA/Sectionscadastrales.shp", stringsAsFactors = FALSE)
+Sections <- st_read(dsn = "Sectionscadastrales.shp", stringsAsFactors = FALSE)
 
 Sections$id <- as.character(Sections$id) 
 Sections <- Sections %>% mutate(codesection = id)
@@ -208,7 +207,6 @@ layoutLayer(title = "Prix moyen au m² de l'immobilier par section cadastrale da
 labelLayer(Selection_Communes_RM, txt = "NOM_COM", halo = TRUE, bg = "white", r = 0.05, cex = 0.7, pos = 3, font = 3, offset = 0, overlap = TRUE)
 
 ```
-
 
 ### Calculer et cartographier le nombre de mutations par section cadastrale
 
@@ -262,20 +260,7 @@ labelLayer(Selection_Communes_RM, txt = "NOM_COM", halo = TRUE, bg = "white", r 
 ```
 
 
----
-## 4-Lissage spatial (échelle métropolitaine)
-
-### Chargement des packages nécessaires
-```{r}
-library(sp) # pour importer des objets ayant une composante spatiale
-library(rgdal) # pour manipuler des objets ayant une composante spatiale
-library(rgeos) # pour calculer des centroides
-library(spdep) # pour calculer l'auto-corrélation spatiale
-library(geoR) # pour calculer le semi-variogramme empirique
-library(spatstat) # pour produire des surfaces lissées
-library(maptools) # pour le traitement cartographique
-library(raster) # pour le traitement de données matricielles
-```
+## Lissage spatial (échelle métropolitaine)
 
 ### Lissage spatial des prix de l'immobilier au m² calculés à partir des valeurs agrégées par IRIS
 
@@ -457,7 +442,7 @@ labelLayer(Selection_Communes_RM, txt = "NOM_COM", halo = TRUE, bg = "white", r 
 
 #### Calcul de la distance au plus proche voisin et de l'auto-corrélation spatiale des prix au m²
 
-```{r}
+```{r warning=FALSE}
 # pour convertir les mutations en objet spatial (format requis par le package geoR)
 MutationsRM.sp <- as(MutationsRM, "Spatial")
 
@@ -477,7 +462,7 @@ moran.test(MutationsRM.sp$prixm2, listw = nb2listw(PPV))
 
 #### Carte lissée des prix de l'immobilier au m² calculés directement à partir des mutations immobilières sur l'ensemble de Rennes Métropole
 
-```{r}
+```{r warning=FALSE}
 # Si nécessaire,  convertir les mutations en objet spatial (format requis par le package geoR)
 MutationsBZHsp <- as(MutationsBZH, "Spatial")
 
@@ -534,15 +519,7 @@ labelLayer(Selection_Communes_RM, txt = "NOM_COM", halo = TRUE, bg = "white", r 
 ```
 
 
----
-
-## 5-Elaboration d'une typologie à partir d'indicateurs immobiliers et cartographie des sous-marchés associés (échelle métropolitaine)
-
-### Chargement du package nécessaire
-
-```{r}
-library(cluster)
-```
+## Elaboration d'une typologie à partir d'indicateurs immobiliers et cartographie des sous-marchés associés (échelle métropolitaine)
 
 ### Transfert d'attributs des IRIS vers les mutations (jointure spatiale)  
 ```{r}
@@ -551,7 +528,7 @@ MutationsIRIS <- as.data.frame(MutationsIRIS)
 
 ```
 
-### Tableau récapitulatif des variables par IRIS à soumettre à la CAH
+### Création d'un tableau avec les variables par IRIS à soumettre à la CAH
 ```{r}
 IRISDVFClassif1 <- MutationsIRIS %>% group_by(code_iris) %>%
   summarise(Nbtransactions = n(),
@@ -601,7 +578,7 @@ IRISCluster$CLUSIMMO <- factor(clusIRIS,
                                    labels = paste("Classe", 1:5))
 ```
 
-### Tableau récapitulatif des groupes
+### Création d'un tableau avec les caractéristiques des groupes
 ```{r}
 RecapCAHIRIS <- IRISCluster %>% group_by(CLUSIMMO) %>% summarise(NB= n(), NbTransac = mean(Nbtransactions), Prixmoyen = mean(Prixmoyen), Prixm2 = mean(Prixm2moyen), Surface=mean(Surfacemoyenne), PropMaison = mean(PropMaison), PropAppart= mean(PropAppart))
 
@@ -687,13 +664,13 @@ labelLayer(Selection_Communes_RM, txt = "NOM_COM", halo = TRUE, bg = "white", r 
 
 ### Export des IRIS contenant la typologie issue de la CAH au format geopackage (pour une utilisation dans un SIG par exemple)
 
-```{r, include=TRUE}
-st_write(IRISDVFCAH, "Exports/IRISDVFCAH.gpkg", append = FALSE)
+```{r message=FALSE, warning=FALSE, include=TRUE, eval=FALSE}
+st_write(IRISDVFCAH, "IRISDVFCAH.gpkg", append = FALSE)
 ```
 
 
----
-## 6-Lissage spatial des prix au m² des appartements entre 2014 et 2019 : zoom sur la commune de Rennes
+
+## Lissage spatial des prix au m² des appartements entre 2014 et 2019 : zoom sur la commune de Rennes
 
 ### Préparation du jeu de données
 
@@ -710,7 +687,7 @@ ListAnnees <- unique(MutationsApptRM$annee)
 ```
 
 ### Série de cartes lissées montrant l'évolution des prix au m² des appartements calculés directement à partir des mutations, à Rennes entre 2014 et 2019
-```{r eval=FALSE, message=FALSE, warning=FALSE, include=FALSE}
+```{r eval=FALSE, message=FALSE, warning=FALSE, include=FALSE, echo=TRUE}
 # pour définir comme emprise pour le lissage, l'étendue de Rennes avec une zone tampon de 0,5 km autour afin d'englober les mutations limitrophes et réduire l'effet de bord
 EmpriseRennes <- as.owin(as(st_union(st_buffer(CommuneRennes, 500)), "Spatial"))
 
