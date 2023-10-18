@@ -1,0 +1,261 @@
+---
+title: 'DVF Script 1'
+author: '[Boris Mericskay](https://perso.univ-rennes2.fr/boris.mericskay) et [Florent
+  Demoraes](https://perso.univ-rennes2.fr/florent.demoraes)'
+date: '02/07/2021  - Mise à jour 15/10/2023'
+output:
+  html_document:
+    toc: yes
+    toc_float:
+      collapsed: yes
+      smooth_scroll: yes
+    number_sections: yes
+  word_document:
+    toc: yes
+    number_sections: yes
+  pdf_document:
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = 'C:/DVF/SIGAT')
+```
+
+# PRÉPARATION DES DONNÉES DVF OPENDATA
+
+Cette première partie du script a comme objectif de préparer les données DVF en opendata (apurement, filtrage, agrégation,...) avant de commencer les analyses.
+
+Seul le package `tidyverse` dédié à la manipulation de données est nécessaire.
+
+```{r loading package, error=FALSE, message=FALSE, warning=FALSE}
+library(tidyverse)
+```
+
+## Chargement du jeu de données
+
+Dans le cadre de cet exercice, ce sont les données <a href="https://www.data.gouv.fr/fr/datasets/5cc1b94a634f4165e96436c1/" target="_blank">« DVF géolocalisées »</a>, enrichies par Etalab qui sont utilisées. La base initiale pour les quatre départements bretons (Côtes-d’Armor, Finistère, Ille-et-Vilaine et Morbihan) recense entre le 1er janvier 2014 et le 31 décembre 2019, 446 818 mutations distinctes correspondant à 1 043 052 lignes et 40 colonnes dans la base de données. 
+
+```{r loading dataset}
+DVF <- read.csv("importfichier.csv", encoding = "UTF-8")
+```
+
+## Filtre et nettoyage des données
+
+### Etape1 -\> Sélection des mutations de type "Ventes" de "Maison" et "Appartement'
+
+```{r selection Maisons et Appartements}
+etape1 <- DVF %>% filter(nature_mutation == "Vente")
+etape1bis <- etape1 %>% filter(type_local == "Maison" | type_local == "Appartement")
+```
+
+### Etape2 -\> Sélection et renommage des variables
+
+```{r selection et renommage variable}
+etape2 <- etape1bis %>% select(id = id_mutation, disposition = numero_disposition, parcelle = id_parcelle, date = date_mutation, nature = nature_mutation, codecommune = code_commune, departement = code_departement, type = type_local, surface = surface_reelle_bati, piece = nombre_pieces_principales, prix = valeur_fonciere, latitude, longitude)
+```
+
+### Etape3 -\> Remplacement des cellules vides par des NA et suppression des NA
+
+```{r suppression des NA}
+etape2[etape2 == ""] <- NA
+etape3 <- etape2 %>% na.omit()
+```
+
+## Suppression des doublons et des mutations multiventes
+
+### Etape4 -\> Sélections des mutations simples
+
+#### Regrouper les transactions selon l'ID, la surface et le prix de vente
+
+```{r regroupement des transactions}
+any(duplicated(paste0(etape3$id, etape3$prix, etape3$surface))) # pour vérifier s'il y a des doublons (lignes partageant le même id, le même prix et la même surface)
+unique <- etape3 %>% distinct(id, prix, surface)
+nbunique <- unique %>% group_by(id) %>% summarise(nb = n())
+```
+
+#### Suppression des doublons et des mutations multiventes
+
+```{r Suppression des doublons}
+etape4 <- nbunique %>% filter(nb == 1)
+```
+
+### Etape5 -\> Jointure attributaire pour récupérer les informations des mutations dans la table sans doublon
+
+```{r jointure}
+merge <- cbind(etape4, etape3[match(etape4$id, etape3$id), -1, drop = TRUE])
+etape5 <- merge %>% select(id, date, type, nature, codecommune, prix, surface, piece, latitude, longitude)
+```
+
+#### Modification du format des colonnes (nombres entiers -\> nombres réels)
+
+```{r formatage}
+etape5$prix <- as.numeric(etape5$prix)
+etape5$surface <- as.numeric(etape5$surface)
+etape5$piece <- as.numeric(etape5$piece)
+```
+
+------------------------------------------------------------------------
+
+## Suppression des valeurs aberrantes
+
+#### Fixer un seuil minimal des prix (percentiles)
+
+```{r seuil minimal}
+quantile(etape5$prix, 0.01)
+```
+
+#### Fixer un seuil maximal des prix (histogramme)
+
+```{r seuil maximal}
+options(scipen=999)
+summary(etape5$prix)
+hist(etape5$prix, breaks = 50000, xlim = c(0,1000000))
+```
+
+#### Créer deux jeux de données (maisons / appartements)
+
+```{r creation de deux jeux}
+Maisons <- etape5 %>% filter(type == 'Maison')
+Appartements <- etape5 %>% filter (type == 'Appartement')    
+```
+
+#### Fixer un seuil maximal des surfaces (histogramme)
+
+```{r seuil max surface}
+hist(Maisons$surface, nclass = 500, xlim = c(0,600))
+hist(Appartements$surface, nclass = 500, xlim = c(0,300))
+```
+
+### Etape 6 -\> Sélection des bornes de prix et de surface
+
+```{r selection bornes}
+etape6 <- etape5 %>% filter(between(prix, 15000, 5000000)) %>%
+                     filter(case_when(type == 'Appartement' ~ between(surface, 10, 200)) | 
+                            case_when(type == 'Maison' ~ between(surface, 10, 350)))
+```
+
+## Calcul du prix au m² et exclusion des valeurs extrêmes et aberrantes
+
+### Etape7 -\> Calcul de la variable prix/m²
+
+```{r creation variable prix m²}
+etape7 <- etape6 %>% mutate(prixm2 = prix/surface)
+```
+
+### Etape8 -\> Sélection des bornes de prix au m²
+
+#### Fixer un seuil minimal des prix au m² (percentile)
+
+```{r seul min prix m²}
+quantile(etape7$prixm2, 0.01)
+```
+
+#### Fixer un seuil maximal des prix au m² (histogramme)
+
+```{r seuil max prix m²}
+hist(etape7$prixm2, breaks = 1000, xlim = c(0,10000))
+```
+
+#### Filtres des valeurs
+
+```{r filtre prix m²}
+etape8 <- etape7 %>% filter(between(prixm2,330,8000))
+```
+
+#### Extraction de l'année à partir de la date
+
+```{r cars}
+etape8 <- etape8 %>% mutate(annee = substr(etape8$date, 1, 4))
+```
+
+#### Arrondir les valeurs
+
+```{r arrondir}
+etape8$prix <- round(etape8$prix)
+etape8$prixm2 <- round(etape8$prixm2)
+```
+
+## Enrichissement des mutations avec de nouvelles variables
+
+### Etape9 -\> Ajout de variables relatives à la commune et à l'EPCI (Liste des communes du Code Officiel Géographique)
+
+```{r ajout COG}
+COG <- read.csv("COG.csv", sep = ",", encoding = "UTF-8")
+COG <- COG %>% mutate(codecommune = CODGEO)
+etape9 <- merge(etape8, COG, by = "codecommune")
+```
+
+### Etape10 -\> Ajout de variables relatives au département (Liste des départements du Code Officiel Géographique)
+
+```{r ajout variables dpt}
+Dep <- read.csv("departement2020.csv", encoding = "UTF-8", sep = ";")
+Dep <- Dep %>% mutate(DEP = dep)
+etape10 <- merge(etape9, Dep, by = "DEP")
+```
+
+### Etape11 -\> Ajout de la catégorisation des communes de l'Insee
+
+```{r ajout typo Insee}
+TYPOINSEE <- read.csv("TYPOINSEE.csv", sep = ",", encoding = "UTF-8")
+TYPOINSEE <- TYPOINSEE %>% mutate(codecommune = Code)
+etape11 <- merge(etape10, TYPOINSEE, by = "codecommune")
+```
+
+### Etape12 -\> Structuration du jeu de données final
+
+```{r structuration finale}
+DVFOK <- etape11 %>% select(id, date, annee, type, prix, surface, prixm2, codecommune, commune = LIBGEO, Dep = nccenr, EPCI= LIBEPCI, Typo_INSEE = typo, latitude, longitude)
+```
+
+### Exporter le jeu de données final en csv
+
+```{r export csv}
+write.csv(DVFOK, 'DVFOK.csv', quote = FALSE, row.names = FALSE)
+```
+
+### Diagnostic des types de mutations
+
+#### Calcul du nombre de mutations
+
+```{r nb mutations}
+length(unique(etape3$id))
+```
+
+#### Nombre de mutations multiventes
+
+```{r nb mutations multiventes}
+MutationsComplexes <- nbunique %>% filter(nb > 1)
+length(unique(MutationsComplexes$id))
+```
+
+#### Nombre de mutations monoventes/monolignes
+
+```{r nb mutations monoventes monolignes}
+uniquesimple <- etape3 %>% group_by(id) %>% summarise(prix = first(prix), surface = first(surface), nb = n())
+nbtransactionssimplemonoligne <- uniquesimple %>% filter(nb == 1)
+length(unique(nbtransactionssimplemonoligne$id))
+```
+
+#### Nombre de mutations monoventes/multilignes
+
+```{r nb mutations monoventes multilignes}
+A <- length(unique(etape3$id))
+B <- length(unique(nbtransactionssimplemonoligne$id))
+A - B
+```
+
+#### Diagnostic du nombre de biens par mutation
+
+```{r nb de biens par mutation}
+diaggroup <- nbunique %>% mutate(as.character(nb)) %>% group_by(nb) %>% summarise(tot = n())
+```
+
+#### Nombre de mutations multiventes, nombre total et nombre moyen de biens associés
+
+```{r stat sur mutations}
+length(MutationsComplexes$id)
+sum(MutationsComplexes$nb)
+mean(MutationsComplexes$nb)
+```
+
