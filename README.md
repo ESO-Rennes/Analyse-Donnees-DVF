@@ -9,7 +9,7 @@
 # Analyse-Donnees-DVF
 Cette page propose 4 scripts R permettant de préparer, analyser et représenter les données "Demandes de Valeurs Foncières" disponibles en Open Data
 
-Auteurs: Boris Mericskay et Florent Demoraes - 2022 - Mise à jour le 18/10/2023
+Auteurs : <a href="https://perso.univ-rennes2.fr/boris.mericskay" target="_blank" rel="noopener"><strong>Boris Mericskay</strong></a> et <a href="https://perso.univ-rennes2.fr/florent.demoraes" target="_blank" rel="noopener"><strong>Florent Demoraes</strong></a> - Première version 2021 - <strong>Mise à jour le 18/10/2023</strong></a>
 
 #### Script 1 
 Ce premier script permet de préparer et structurer les données DVF en open data (nettoyage, filtrage, agrégation,...).
