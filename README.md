@@ -1,4 +1,10 @@
---> Lien vers le <a href="https://github.com/ESO-Rennes/Analyse-Donnees-DVF/blob/main/data" target="_blank" rel="noopener"><strong>jeu de données</strong></a>
+--> Lien vers le <a href="https://github.com/ESO-Rennes/Analyse-Donnees-DVF/blob/main/data" target="_blank" rel="noopener"><strong>jeu de données décompressé</strong></a>
+
+--> Liens vers le jeu de données compressé plus facile à télécharger 
+(<a href="https://github.com/ESO-Rennes/Analyse-Donnees-DVF/blob/main/Data_Part_1.7z" target="_blank" rel="noopener"><strong>archive 1</strong></a> et 
+<a href="https://github.com/ESO-Rennes/Analyse-Donnees-DVF/blob/main/Data_Part_2.7z" target="_blank" rel="noopener"><strong>archive 2</strong></a>)<br>
+</br>
+
 
 # Analyse-Donnees-DVF
 Cette page propose 4 scripts R permettant de préparer, analyser et représenter les données "Demandes de Valeurs Foncières" disponibles en Open Data
