@@ -1,0 +1,763 @@
+---
+title: 'DVF Script 4'
+author: '[Boris Mericskay](https://perso.univ-rennes2.fr/boris.mericskay) et [Florent Demoraes](https://perso.univ-rennes2.fr/florent.demoraes)'
+date: '02/07/2021 - Mise à jour 17/10/2023'
+output:
+  word_document:
+    toc: yes
+    number_sections: true
+  html_document: 
+    toc: yes
+    toc_float:
+      collapsed: yes
+      smooth_scroll: yes
+    number_sections: yes
+    toc_depth: 4
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = 'C:/DVF/SIGAT')
+```
+
+# LES DONNÉES DVF À UNE ÉCHELLE LOCALE : LES EXEMPLES DE LA MÉTROPOLE RÉGIONALE ET DE LA COMMUNE DE RENNES
+
+Ce script décrit plusieurs fonctions de manipulation de la dimension spatiale des données DVF. Il propose aussi plusieurs formes de représentation cartographique de ces données à une échelle métropolitaine (Rennes Métropole).
+
+## Chargement des packages nécessaires
+
+```{r loading package, warning = FALSE, message = FALSE}
+library(tidyverse) # Manipulation de données
+library(sf) # Manipulation de données spatiales
+library(cartography) # Cartographie thématique
+library(spdep) # pour calculer l'auto-corrélation spatiale
+library(geoR) # pour calculer le semi-variogramme empirique
+library(spatstat) # pour produire des surfaces lissées
+library(terra) # pour le traitement de données matricielles (raster)
+library(cluster) # pour la CAH
+```
+
+## Import du jeu de données brut
+
+```{r Import donnees}
+DVF <- read.csv("DVFOK.csv", encoding = "UTF-8")
+MutationsBZH <- st_read("MutationsBZH.gpkg")
+```
+
+## Créer le jeu de données correspondant à Rennes métropole (RM)
+
+### Extraire les mutations de Rennes Métropole
+
+```{r extraction mutations RM}
+MutationsRM <- MutationsBZH %>% filter(EPCI == 'Rennes Métropole')
+```
+
+### Création d'un tableau avec les indicateurs immobiliers de RM
+
+```{r synthese indicateurs immo RM}
+RecapRM <- MutationsRM %>% group_by(type) %>% 
+  summarise(tot = n(), prixmed = round(median(prix)), prixmoy = round(mean(prix)), surfmed = round(median(surface)), surfmoy = round(mean(surface)), prixm2med = round(median(prixm2)), prixm2moy = round(mean(prixm2)))
+RecapRM <- RecapRM %>% mutate(part = (tot/sum(tot)*100))
+print(RecapRM)
+```
+
+## Exploration des prix et des volumes à l'échelon des Iris
+
+### Importer la couche des Iris (IGN)
+
+```{r import couche Iris}
+IRISRM <- st_read("IRISRM.shp")
+plot(IRISRM["ccom"])
+```
+
+### Calculer et cartographier le prix moyen au m² par Iris
+
+```{r calcul et carto prix moy m2 Iris}
+# Réimporter si nécessaire la couche des communes de Bretagne enrichie dans le script 3
+Communes <- st_read("CommunesBZHDVF.gpkg")
+
+# Calcul du prix moyen au m² par IRIS
+IRISDVF <- IRISRM %>% st_join(MutationsRM) %>% group_by(code_iris) %>% summarise(Prixm2 = round(mean(prixm2)))
+
+# Sélection des communes dont le nom sera affiché sur la carte
+liste_noms_RM <- c("Rennes", "Cesson-Sévigné", "Chartres-de-Bretagne", "Bécherel", "Mordelles", "Corps-Nuds", "Chevaigné")
+Selection_Communes_RM <- Communes[which(Communes$NOM_COM %in% liste_noms_RM),]
+
+# Paramétrage des marges de la fenêtre pour maximiser l'emprise de la carte
+par(mar = c(0, 0, 1.2, 3))
+
+# Affichage des communes de RM et alentours en arrière-plan et centrage de la carte sur Rennes Métropole
+plot(st_geometry(Communes), lwd = 0.1, col = "grey95", border = "white", bg = "#B5D0D0", xlim = c(st_bbox(IRISRM)[1], st_bbox(IRISRM)[3]), ylim = c(st_bbox(IRISRM)[2], st_bbox(IRISRM)[4])) 
+
+choroLayer(
+  x = IRISDVF,
+  var = "Prixm2",
+  breaks = c(1250, 1500, 2000, 2500, 3000, 3600),
+  col = c("#1a9641", "#a6d96a", "#ffffbf", "#fdae61", "#d7191c"),
+  add = TRUE,
+  border = "black",
+  legend.nodata = "Aucune mutation",
+  legend.border = "white",
+  legend.title.txt = "Prix moyen \nau m² (Euros)")
+
+layoutLayer(title = "Prix moyen au m² de l'immobilier par Iris dans Rennes Métropole (2014-2019)", source = "         IGN et DGFip", 
+            north = TRUE, horiz = FALSE, tabtitle = TRUE,
+            frame = FALSE, col = "#cdd2d4", coltitle = "#8A5543")
+
+# Ajouter les étiquettes des communes selectionnées plus haut
+labelLayer(Selection_Communes_RM, txt = "NOM_COM", halo = TRUE, bg = "white", r = 0.05, cex = 0.6, pos = 3, font = 3, offset = 0, overlap = TRUE)
+
+```
+
+### Calculer et cartographier le nombre de mutations par Iris
+
+```{r calcul et carto nb mutations Iris}
+# Calcul du nombre de mutations par IRIS
+IRISDVF <- IRISDVF %>% mutate(Nbmutations = lengths(st_intersects(IRISDVF, MutationsRM)))
+IRISDVF <- IRISDVF %>% na.omit() # pour supprimer les valeurs manquantes
+
+# Paramétrage des marges de la fenêtre pour maximiser l'emprise de la carte
+par(mar = c(0, 0, 1.2, 3))
+
+# Affichage des communes de RM et alentours en arrière-plan et centrage de la carte sur Rennes Métropole
+plot(st_geometry(Communes), lwd = 0.1, col = "grey95", border = "white", bg = "#B5D0D0", xlim = c(st_bbox(IRISRM)[1], st_bbox(IRISRM)[3]), ylim = c(st_bbox(IRISRM)[2], st_bbox(IRISRM)[4])) 
+
+# Affichage des IRIS
+plot(st_geometry(IRISRM), # appel du jeu de données
+     border = "grey80", # couleur de la bordure des IRIS
+     add = TRUE,
+     lwd = 0.05) 
+
+# Affichage des symboles proportionnels (nombre de mutations)
+propSymbolsLayer(x = IRISDVF, # appel du jeu de données
+                 var = "Nbmutations", # appel de la variable à cartographier
+                 col = "#2ECC40", # couleur des cercles
+                 border = "white",  # couleur du contour des cercles
+                 lwd = 0.01,
+                 inches = 0.08, # Taille des cercles
+                 add = TRUE,
+                 legend.pos = "n",
+                 ) 
+
+layoutLayer(title = "Nombre de mutations par Iris dans Rennes Métropole (2014-2019)", source = "         IGN et DGFip", north = TRUE, horiz = FALSE, tabtitle = TRUE, frame = FALSE, col = "#cdd2d4", coltitle = "#8A5543")
+
+legendCirclesSymbols(
+  pos = "bottomleft",
+  title.txt = "Nombre de mutations DVF",
+  title.cex = 0.8,
+  cex = 1,
+  border = "white",
+  lwd = 0.01,
+  values.cex = 0.6,
+  var = c(min(IRISDVF$Nbmutations), max(IRISDVF$Nbmutations)),
+  inches = 0.08,
+  col = "#2ECC40",
+  frame = FALSE,
+  values.rnd = 0,
+  style = "e"
+)
+
+# Ajouter les étiquettes des communes selectionnées plus haut
+labelLayer(Selection_Communes_RM, txt = "NOM_COM", halo = TRUE, bg = "white", r = 0.05, cex = 0.6, pos = 3, font = 3, offset = 0, overlap = TRUE)
+```
+
+## Exploration des prix et des volumes à l'échelon des sections cadastrales
+
+### Importer la couche des sections cadastrales (DGFip)
+
+```{r import sections cadastrales}
+Sections <- st_read("Sectionscadastrales.shp")
+Sections <- Sections %>% mutate(codesection = id)
+plot(Sections["commune"])
+```
+
+### Calculer et cartographier le prix moyen au m² par section cadastrale
+
+```{r calcul et carto prix moy m2 sections cadastrales}
+# Calcul du prix moyen au m² par section
+SectionsDVF <- Sections %>% st_join(MutationsRM) %>% group_by(codesection) %>% summarise(Prixm2 = round(mean(prixm2)))
+SectionsDVF <- SectionsDVF %>% na.omit() # pour supprimer les valeurs manquantes
+
+# Paramétrage des marges de la fenêtre pour maximiser l'emprise de la carte
+par(mar = c(0, 0, 1.2, 3))
+
+# Affichage des communes de RM et alentours en arrière-plan et centrage de la carte sur Rennes Métropole
+plot(st_geometry(Communes), lwd = 0.1, col = "grey95", border = "white", bg = "#B5D0D0", xlim = c(st_bbox(IRISRM)[1], st_bbox(IRISRM)[3]), ylim = c(st_bbox(IRISRM)[2], st_bbox(IRISRM)[4])) 
+
+# Affichage de la carte des prix au m² par section cadastrale
+choroLayer(
+  x = SectionsDVF,
+  var = "Prixm2",
+  breaks = c(1250, 1500, 2000, 2500, 3000, 3600),
+  col = c("#1a9641", "#a6d96a", "#ffffbf", "#fdae61", "#d7191c"),
+  add = TRUE,
+  border = NA,
+  legend.nodata = "Aucune mutation",
+  legend.border = "white",
+  legend.title.txt = "Prix moyen \nau m² (Euros)")
+
+layoutLayer(title = "Prix moyen au m² de l'immobilier par section cadastrale dans Rennes Métropole (2014-2019)", source = "         IGN et DGFip", 
+            north = TRUE, horiz = FALSE, tabtitle = TRUE,
+            frame = FALSE, col = "#cdd2d4", coltitle = "#8A5543")
+
+# Ajouter les étiquettes des communes selectionnées plus haut
+labelLayer(Selection_Communes_RM, txt = "NOM_COM", halo = TRUE, bg = "white", r = 0.05, cex = 0.6, pos = 3, font = 3, offset = 0, overlap = TRUE)
+
+```
+
+### Calculer et cartographier le nombre de mutations par section cadastrale
+
+```{r calcul et carto nb mutations section cadastrale}
+# Calcul du nombre de mutations par section
+SectionsDVF <- SectionsDVF %>% mutate(Nbmutations = lengths(st_intersects(SectionsDVF, MutationsRM)))
+
+# Paramétrage des marges de la fenêtre pour maximiser l'emprise de la carte
+par(mar = c(0, 0, 1.2, 3))
+
+# Affichage des communes de RM et alentours en arrière-plan et centrage de la carte sur Rennes Métropole
+plot(st_geometry(Communes), lwd = 0.1, col = "grey95", border = "white", bg = "#B5D0D0", xlim = c(st_bbox(IRISRM)[1], st_bbox(IRISRM)[3]), ylim = c(st_bbox(IRISRM)[2], st_bbox(IRISRM)[4])) 
+
+# Affichage des sections cadastrales
+plot(st_geometry(SectionsDVF), # appel du jeu de données
+     border = "grey80", # couleur de la bordure
+     add = TRUE,
+     lwd = 0.05) 
+
+# Affichage des symboles proportionnels (nombre de mutations)
+propSymbolsLayer(x = SectionsDVF, # appel du jeu de données
+                 var = "Nbmutations", # appel de la variable à cartographier
+                 col = "#2ECC40", # couleur cercles
+                 border = "white",  # couleur du contour des cercles
+                 lwd = 0.01,
+                 inches = 0.08, # Taille des cercles
+                 add = TRUE,
+                 legend.pos = "n",
+                 ) 
+
+layoutLayer(title = "Nombre de mutations par section cadastrale dans Rennes Métropole (2014-2019)", source = "         IGN et DGFip", north = TRUE, horiz = FALSE, tabtitle = TRUE, frame = FALSE, col = "#cdd2d4", coltitle = "#8A5543")
+
+legendCirclesSymbols(
+  pos = "bottomleft",
+  title.txt = "Nombre de mutations DVF",
+  title.cex = 0.8,
+  cex = 1,
+  border = "white",
+  lwd = 0.01,
+  values.cex = 0.6,
+  var = c(min(IRISDVF$Nbmutations), max(IRISDVF$Nbmutations)),
+  inches = 0.08,
+  col = "#2ECC40",
+  frame = FALSE,
+  values.rnd = 0,
+  style = "e"
+)
+
+# Ajouter les étiquettes des communes selectionnées plus haut
+labelLayer(Selection_Communes_RM, txt = "NOM_COM", halo = TRUE, bg = "white", r = 0.05, cex = 0.6, pos = 3, font = 3, offset = 0, overlap = TRUE)
+```
+
+## Lissage spatial (échelle métropolitaine)
+
+### Lissage spatial des prix de l'immobilier au m² calculés à partir des valeurs agrégées par Iris
+
+#### Calcul des distances au plus proche voisin et de l'auto-corrélation spatiale des prix au m²
+
+```{r calcul dist PPV et autocorrelation spatiale Iris, warning = FALSE}
+# pour calculer les pseudo-centroides des Iris (indispensable pour le calcul sur les plus proches voisins)
+IRISDVF.Centroids <- st_point_on_surface(IRISDVF)
+
+# Identification du plus proche voisin de chaque Iris
+listPPV <- knearneigh(IRISDVF.Centroids, k = 1) # pour connaître le plus proche voisin de chaque Iris
+PPV <- knn2nb(listPPV, row.names = IRISDVF.Centroids$code_iris) # pour convertir l'objet knn en objet nb
+distPPV <- nbdists(PPV, IRISDVF.Centroids) # pour connaître la distance entre plus proches voisins
+print(as.data.frame(t(as.matrix(summary(unlist(distPPV))))))
+hist(unlist(distPPV), breaks = 20,
+     main = "Distance au plus proche voisin",
+     col = "black", border = "white", xlab = "Distance", ylab = "Fréquence")
+
+# pour convertir les Iris en objet nb
+IRIS.nb <- poly2nb(pl = IRISDVF,
+                 snap = 50,
+                 queen = TRUE)
+
+#calcul du test de Moran
+moran.test(IRISDVF$Prixm2, listw = nb2listw(IRIS.nb))
+
+```
+
+#### Carte lissée des prix de l'immobilier au m² calculés à partir des valeurs agrégées par Iris sur l'ensemble de Rennes Métropole
+
+```{r carte lissee prix Iris RM}
+# pour définir le contour de Rennes Métropole comme emprise pour le lissage (sinon le lissage est calculé sur une fenêtre rectangulaire)
+EmpriseRM <- as.owin(st_geometry(IRISRM))
+
+# pour récupérer les coordonnées du centroïde des IRIS
+pts <- st_coordinates(st_point_on_surface(st_geometry(IRISDVF)))
+
+# pour créer un objet ppp (format spatstat) et y intégrer dedans l'emprise et les valeurs à lisser (prix au m²)
+IRISDVF.ppp <- ppp(pts[,1], pts[,2], window = EmpriseRM, marks = IRISDVF$Prixm2)
+
+# pour calculer la surface lissée (rayon lissage : 1 km et resolution spatiale de l'image : 1 ha)
+cartelissee <- Smooth(IRISDVF.ppp, sigma = 1000, weights = IRISDVF.ppp$marks, eps = 100)
+
+# Conversion de la surface lissée au format raster
+cartelissee.raster <- terra::rast(cartelissee)
+crs(cartelissee.raster) <- st_crs(Communes)$srid
+
+# Paramétrage des marges de la fenêtre pour maximiser l'emprise de la carte
+par(mar = c(0, 0, 1.2, 2))
+
+# pour afficher la surface lissée et définir l'habillage
+# Calcul des seuils
+bks <- unique(getBreaks(values(cartelissee.raster), method = "q6"))
+
+# Création d'une palette de couleurs (double gradation harmonique)
+cols <- c("#2a9c4e", "#77c35c", "#c4e687", "#ffffc0", "#fec981", "#dc292c")
+
+# Affichage des communes de RM et alentours en arrière-plan et centrage de la carte sur Rennes Métropole
+plot(st_geometry(Communes), lwd = 0.1, col = "grey95", border = "white", bg = "#B5D0D0", xlim = c(st_bbox(IRISRM)[1], st_bbox(IRISRM)[3]), ylim = c(st_bbox(IRISRM)[2], st_bbox(IRISRM)[4]))
+
+# Affichage de la carte lissée et du contour des Iris
+plot(cartelissee.raster, breaks = bks, col = cols, add = T, legend = F)
+plot(IRISDVF$geometry, border = "grey60", lwd = 0.05, lty = 3, add = T)
+
+legendChoro(
+  pos = "bottomleft",
+  title.txt = "Prix moyen \nau m² (Euros)",
+  breaks = bks, 
+  nodata = FALSE,
+  values.rnd = -1,
+  border = "white",
+  col = cols
+)
+
+# Habillage de la carte
+layoutLayer(title = "Prix moyen au m² de l'immobilier dans Rennes Métropole (2014-2019)", 
+            author = "          Sources : IGN et DGFip - Rayon : 1000 m,\n          résolution : 1 ha - A partir des Iris", 
+            scale = 5, frame = TRUE, col = "#cdd2d4", coltitle = "#8A5543", 
+            north = TRUE, tabtitle = TRUE, horiz = FALSE)
+
+# Ajouter les étiquettes des communes sélectionnées plus haut
+labelLayer(Selection_Communes_RM, txt = "NOM_COM", halo = TRUE, bg = "white", r = 0.05, cex = 0.6, pos = 3, font = 3, offset = 0)
+```
+
+### Lissage spatial du prix de l'immobilier au m² calculés à partir des valeurs agrégées par section cadastrale
+
+#### Calcul des distances au plus proche voisin et de l'auto-corrélation spatiale des prix au m²
+
+```{r calcul dist PPV et autocorrelation spatiale section cadastrale, warning = FALSE}
+# pour calculer les pseudo-centroides des sections cadastrales (indispensable pour le calcul sur les plus proches voisins)
+SectionsDVF.Centroids <- st_point_on_surface(SectionsDVF)
+
+# Calcul sur les plus proches voisins
+listPPV <- knearneigh(SectionsDVF.Centroids, k = 1) # pour connaître le plus proche voisin de chaque section cadastrale
+PPV <- knn2nb(listPPV, row.names = SectionsDVF.Centroids$codesection) # pour convertir l'objet knn en objet nb
+distPPV <- nbdists(PPV, SectionsDVF.Centroids) # pour connaître la distance entre plus proches voisins
+print(as.data.frame(t(as.matrix(summary(unlist(distPPV))))))
+hist(unlist(distPPV), breaks = 20,
+     main = "Distance au plus proche voisin",
+     col = "black", border = "white", xlab = "Distance", ylab = "Fréquence")
+
+# pour convertir les sections en objet nb
+Section.nb <- poly2nb(pl = SectionsDVF,
+                 snap = 50,
+                 queen = TRUE)
+
+#calcul du test de Moran
+moran.test(SectionsDVF$Prixm2, listw = nb2listw(Section.nb))
+
+```
+
+#### Carte lissée des prix de l'immobilier au m² calculés à partir des valeurs agrégées par section cadastrale sur l'ensemble de Rennes Métropole
+
+```{r carte lissee prix section cadastrale}
+# pour définir le contour de Rennes Métropole comme emprise pour le lissage (sinon le lissage est calculé sur une fenêtre rectangulaire)
+EmpriseRM <- as.owin(st_geometry(IRISRM))
+
+# pour récupérer les coordonnées du centroïde des sections
+pts <- st_coordinates(st_point_on_surface(st_geometry(SectionsDVF)))
+
+# pour créer un objet ppp (format spatstat) et y intégrer dedans l'emprise et les valeurs à lisser (prix au m²)
+Sections.ppp <- ppp(pts[,1], pts[,2], window = EmpriseRM, marks = SectionsDVF$Prixm2)
+
+# pour calculer la surface lissée (rayon lissage : 1 km et resolution spatiale de l'image : 1 ha)
+cartelissee <- Smooth(Sections.ppp, sigma = 1000, weights = Sections.ppp$marks, eps = 100)
+
+# Conversion de la surface lissée au format raster
+cartelissee.raster <- terra::rast(cartelissee)
+crs(cartelissee.raster) <- st_crs(Communes)$srid
+
+# Paramétrage des marges de la fenêtre pour maximiser l'emprise de la carte
+par(mar = c(0, 0, 1.2, 2))
+
+# pour afficher la surface lissée et définir l'habillage
+# Calcul des seuils
+bks <- unique(getBreaks(values(cartelissee.raster), method = "q6"))
+
+# Création d'une palette de couleurs (double gradation harmonique)
+cols <- c("#2a9c4e", "#77c35c", "#c4e687", "#ffffc0", "#fec981", "#dc292c")
+
+# Affichage des communes de RM et alentours en arrière-plan et centrage de la carte sur Rennes Métropole
+plot(st_geometry(Communes), lwd = 0.1, col = "grey95", border = "white", bg = "#B5D0D0", xlim = c(st_bbox(SectionsDVF)[1], st_bbox(SectionsDVF)[3]), ylim = c(st_bbox(SectionsDVF)[2], st_bbox(SectionsDVF)[4]))
+
+# Affichage de la carte lissée et du contour des sections
+plot(cartelissee.raster, breaks = bks, col = cols, add = T, legend = F)
+plot(SectionsDVF$geometry, border = "grey60", lwd = 0.05, lty = 3, add = T)
+
+legendChoro(
+  pos = "bottomleft",
+  title.txt = "Prix moyen \nau m² (Euros)",
+  breaks = bks, 
+  nodata = FALSE,
+  values.rnd = -1,
+  border = "white",
+  col = cols
+)
+
+layoutLayer(title = "Prix moyen au m² de l'immobilier dans Rennes Métropole (2014-2019)", 
+            author = "         Sources : IGN, DGFip - Rayon : 1000 m\n         résolution : 1 ha - A partir des sections cadastrales", 
+            scale = 5, frame = TRUE, col = "#cdd2d4", coltitle = "#8A5543", 
+            north = TRUE, tabtitle = TRUE, horiz = FALSE)
+
+# Ajouter les étiquettes des communes sélectionnées plus haut
+labelLayer(Selection_Communes_RM, txt = "NOM_COM", halo = TRUE, bg = "white", r = 0.05, cex = 0.6, pos = 3, font = 3, offset = 0)
+```
+
+### Lissage spatial des prix de l'immobilier au m² calculés directement à partir des mutations immobilières sur l'ensemble de Rennes Métropole
+
+#### Calcul de la distance au plus proche voisin et de l'auto-corrélation spatiale des prix au m²
+
+```{r calcul dist PPV et autocorrelation spatiale mutations, warning = FALSE}
+# Calcul sur les plus proches voisins
+listPPV <- knearneigh(MutationsRM, k = 1) # pour connaître le plus proche voisin de chaque mutation
+PPV <- knn2nb(listPPV, row.names = MutationsRM$id) # pour convertir l'objet knn en objet nb
+distPPV <- nbdists(PPV, MutationsRM) # pour connaître la distance entre plus proches voisins
+print(as.data.frame(t(as.matrix(summary(unlist(distPPV))))))
+hist(unlist(distPPV), nclass = 200,
+     main = "Distance au plus proche voisin",
+     col = "black", border = "white", xlab = "Distance", ylab = "Fréquence", xlim = c(0,150))
+
+#calcul du test de Moran
+moran.test(MutationsRM$prixm2, listw = nb2listw(PPV))
+```
+
+#### Carte lissée des prix de l'immobilier au m² calculés directement à partir des mutations immobilières sur l'ensemble de Rennes Métropole
+
+```{r carte lissee calculee a partir mutations, warning = FALSE}
+# pour définir comme emprise pour le lissage, l'étendue de Rennes métropole avec une zone tampon de 0,5 km autour afin d'englober les mutations limitrophes et réduire l'effet de bord
+EmpriseRM.ZT <- as.owin(st_geometry(st_buffer(IRISRM, 500)))
+
+# Extraction des coordonnées spatiales
+coordinates <- st_coordinates(MutationsBZH)
+
+# pour créer un objet ppp (format spatstat) et y intégrer dedans l'emprise et les valeurs à lisser (prix moyen au m²)
+# NB : on considère dans un premier temps les mutations sur l'ensemble de la Bretagne, et on ne retient que celles qui sont incluses dans l'emprise créée à l'étape précédente
+MutationsBZH.ppp <- ppp(x = coordinates[, 1], y = coordinates[, 2], window = EmpriseRM.ZT, marks = MutationsBZH$prixm2)
+
+# pour calculer la surface lissée (rayon lissage : 0,5 km et résolution spatiale de l'image : 1 ha) --> calcul long
+cartelissee <- Smooth(MutationsBZH.ppp, sigma = 500, weights = MutationsBZH.ppp$marks, eps = 100)
+
+# Conversion de la surface lissée au format raster
+cartelissee.raster <- terra::rast(cartelissee)
+crs(cartelissee.raster) <- st_crs(Communes)$srid
+
+# découpage de la surface lissée sur l'emprise Rennes Métropole
+cartelissee.raster <- mask(cartelissee.raster, IRISRM) 
+
+# Paramétrage des marges de la fenêtre pour maximiser l'emprise de la carte
+par(mar = c(0, 0, 1.2, 2))
+
+# pour afficher la surface lissée et définir l'habillage de la carte
+# Calcul des seuils
+bks <- unique(getBreaks(values(cartelissee.raster), method = "q6"))
+
+# Création d'une palette de couleurs (double gradation harmonique)
+cols <- c("#2a9c4e", "#77c35c", "#c4e687", "#ffffc0", "#fec981", "#dc292c")
+
+# Affichage des communes de RM et alentours en arrière-plan et centrage de la carte sur Rennes Métropole
+plot(st_geometry(Communes), lwd = 0.1, col = "grey95", border = "white", bg = "#B5D0D0", xlim = c(st_bbox(IRISRM)[1], st_bbox(IRISRM)[3]), ylim = c(st_bbox(IRISRM)[2], st_bbox(IRISRM)[4]))
+
+# Affichage de la carte lissée et du contour des IRIS
+plot(cartelissee.raster, breaks = bks, col = cols, add = T, legend = F)
+plot(IRISRM$geometry, border = "grey60", lwd = 0.05, lty = 3, add = T)
+
+legendChoro(
+  pos = "bottomleft",
+  title.txt = "Prix moyen \nau m² (Euros)",
+  breaks = bks, 
+  nodata = FALSE,
+  values.rnd = -1,
+  border = "white",
+  col = cols
+)
+
+layoutLayer(title = "Prix moyen au m² de l'immobilier dans Rennes Métropole (2014-2019)", 
+            author = "         Sources : IGN, DGFip - Rayon : 500 m\n         résolution : 1 ha - A partir des mutations", 
+            scale = 5, frame = TRUE, col = "#cdd2d4", coltitle = "#8A5543", 
+            north = TRUE, tabtitle = TRUE, horiz = FALSE)
+
+# Ajouter les étiquettes des communes sélectionnées plus haut
+labelLayer(Selection_Communes_RM, txt = "NOM_COM", halo = TRUE, bg = "white", r = 0.05, cex = 0.6, pos = 3, font = 3, offset = 0)
+```
+
+## Elaboration d'une typologie à partir d'indicateurs immobiliers et cartographie des sous-marchés associés (échelle métropolitaine)
+
+### Transfert d'attributs des Iris vers les mutations (jointure spatiale)
+
+```{r transfert attributs}
+MutationsIRIS <- MutationsRM %>% st_join(IRISRM)
+MutationsIRIS <- as.data.frame(MutationsIRIS)
+
+```
+
+### Création d'un tableau avec les variables par Iris à soumettre à la CAH
+
+```{r preparation tableau pour CAH}
+IRISDVFClassif1 <- MutationsIRIS %>% group_by(code_iris) %>%
+  summarise(Nbtransactions = n(),
+            Prixmoyen = round(mean(prix)),
+            Prixm2moyen = round(mean(prixm2)),
+            Surfacemoyenne = round(mean(surface)),
+            PropMaison = length(type[type == "Maison"]) / Nbtransactions * 100,
+            PropAppart = length(type[type == "Appartement"]) / Nbtransactions * 100)
+
+IRISDVFClassif <- data.frame(IRISDVFClassif1[, c("Nbtransactions", "Prixmoyen", "Prixm2moyen", "Surfacemoyenne", "PropMaison", "PropAppart")])
+```
+
+### Centrage et réduction des variables
+
+```{r centrage reduction variables}
+IRISDVFClassifScale <- scale(IRISDVFClassif)
+```
+
+### Mise en oeuvre de la CAH
+
+```{r lancement CAH}
+CAHIRIS <- agnes(IRISDVFClassifScale,
+                     metric = "euclidean",
+                     method = "ward")
+```
+
+### Graphiques des gains d'inertie inter-classe
+
+```{r graphiques gain inertie}
+sortedHeight<- sort(CAHIRIS$height, decreasing = TRUE)
+relHeight<-sortedHeight/ sum(sortedHeight) * 100
+cumHeight<- cumsum(relHeight)
+
+barplot(relHeight[1:30], names.arg = seq(1, 30, 1), col = "black", border = "white", xlab = "Noeuds", ylab = "Part de l'inertie totale (%)")
+barplot(cumHeight[1:30], names.arg = seq(1, 30, 1), col = "black", border = "white", xlab = "Nombre de classes", ylab = "Part de l'inertie totale (%)")
+```
+
+### Arbre de classification hiérarchique
+
+```{r arbre classification}
+dendroCSP <- as.dendrogram(CAHIRIS)
+plot(dendroCSP, leaflab = "none")
+```
+
+### Partition (en n classes)
+
+```{r partition en n classes}
+clusIRIS <- cutree(CAHIRIS, k = 5)
+IRISCluster <- IRISDVFClassif1
+IRISCluster$CLUSIMMO <- factor(clusIRIS,
+                                   levels = 1:5,
+                                   labels = paste("Classe", 1:5))
+```
+
+### Création d'un tableau avec les caractéristiques des groupes
+
+```{r creation df avec variables des classes}
+RecapCAHIRIS <- IRISCluster %>% group_by(CLUSIMMO) %>% summarise(NB= n(), NbTransac = round(mean(Nbtransactions)), Prixmoyen = round(mean(Prixmoyen)), Prixm2 = round(mean(Prixm2moyen)), Surface = round(mean(Surfacemoyenne)), PropMaison = mean(PropMaison), PropAppart = mean(PropAppart))
+
+print(RecapCAHIRIS)
+```
+
+### Graphique des écarts à la moyenne
+
+```{r diagramme en barres ecarts a la moyenne}
+SyntheseCAHIRIS <- RecapCAHIRIS %>% mutate(
+  nbtransacmoy = mean(IRISDVFClassif$Nbtransactions),
+  surfacemoy = mean(IRISDVFClassif$Surfacemoyenne),
+  prixmoy = mean(IRISDVFClassif$Prixmoyen),
+  prixm2moyen = mean(IRISDVFClassif$Prixm2moyen),
+  propmaisonmoyen = mean(IRISDVFClassif$PropMaison),
+  propappartmoyen = mean(IRISDVFClassif$PropAppart),
+  NbMutations = (NbTransac - nbtransacmoy) / nbtransacmoy * 100,
+  Prix = (Prixmoyen - prixmoy) / prixmoy * 100,
+  Prixm2 = (Prixm2 - prixm2moyen) / prixm2moyen * 100,
+  Surface = (Surface - surfacemoy) / surfacemoy * 100,
+  PropMaison = (PropMaison - propmaisonmoyen) / propmaisonmoyen * 100,
+  PropAppart = (PropAppart - propappartmoyen) / propappartmoyen * 100
+)
+
+# pour créer un nouveau tableau avec une sélection de colonnes à faire apparaître sur le graphique
+SyntheseCAHIRIS <- data.frame(SyntheseCAHIRIS[, c("CLUSIMMO", "NbMutations", "Surface", "Prix", "Prixm2", "PropMaison", "PropAppart")])
+
+gather <- SyntheseCAHIRIS %>% gather(key = variable, value = "value", NbMutations:PropAppart)
+
+ggplot(gather, aes(x = variable, y = value, fill = CLUSIMMO)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  scale_fill_manual(values = c("#2A9D8F","#264653","#fcbf49","#e45c3a","#0074D9")) +
+  ylab("Variation par rapport à la moyenne métropolitaine (%)") +
+  theme_bw() +
+  theme(legend.position = "none") +
+  facet_wrap(~CLUSIMMO, ncol = 1)
+```
+
+### Carte de la typologie montrant les sous-marchés immobiliers métropolitains
+
+```{r carto typo}
+# pour joindre le résultat de la typologie dans la couche des IRIS
+IRISDVFCAH <- left_join(IRISRM, IRISCluster, by = "code_iris")
+
+# Paramétrage des marges de la fenêtre pour maximiser l'emprise de la carte
+par(mar = c(0, 0, 1.2, 2))
+
+# pour afficher la surface lissée et définir l'habillage de la carte
+# Calcul des seuils
+bks <- unique(getBreaks(values(cartelissee.raster), method = "q6"))
+
+# Création d'une palette de couleurs (double gradation harmonique)
+cols <- c("#2a9c4e", "#77c35c", "#c4e687", "#ffffc0", "#fec981", "#dc292c")
+
+# Affichage des communes de RM et alentours en arrière-plan et centrage de la carte sur Rennes Métropole
+plot(st_geometry(Communes), lwd = 0.1, col = "grey95", border = "white", bg = "#B5D0D0", xlim = c(st_bbox(IRISRM)[1], st_bbox(IRISRM)[3]), ylim = c(st_bbox(IRISRM)[2], st_bbox(IRISRM)[4]))
+
+# Affichage de la typologie et du contour des IRIS
+typoLayer(
+  x = IRISDVFCAH,
+  var="CLUSIMMO",
+  col = c("#2A9D8F","#264653","#fcbf49","#e45c3a","#0074D9"),
+  lwd = 0.05,
+  border = "grey70",
+  legend.values.order = c("Classe 1",
+                          "Classe 2",
+                          "Classe 3",
+                          "Classe 4",
+                          "Classe 5"),
+  legend.pos = "bottomleft",
+  legend.title.txt = "Sous-marchés \nimmobiliers",
+  legend.nodata = "Aucune mutation",
+  add = TRUE)
+
+layoutLayer(title = "Sous-marchés immobiliers dans Rennes Métropole à l'échelon des IRIS (2014-2019)", 
+            author = "          Sources : IGN et DGFip - Typologie obtenue par CAH", 
+            scale = 5, frame = TRUE, col = "#cdd2d4", coltitle = "#8A5543", 
+            north = TRUE, tabtitle = TRUE, horiz = FALSE)
+
+# Ajouter les étiquettes des communes sélectionnées plus haut
+labelLayer(Selection_Communes_RM, txt = "NOM_COM", halo = TRUE, bg = "white", r = 0.05, cex = 0.6, pos = 3, font = 3, offset = 0)
+
+```
+
+### Export des Iris contenant la typologie issue de la CAH au format geopackage (pour une utilisation dans un SIG par exemple)
+
+```{r export Iris en gpkg, message = FALSE, warning = FALSE}
+st_write(IRISDVFCAH, "IRISDVFCAH.gpkg", append = FALSE)
+```
+
+## Lissage spatial des prix au m² des appartements entre 2014 et 2019 : zoom sur la commune de Rennes
+
+### Préparation du jeu de données
+
+```{r prepa jeu donnees et parametres pour lissage}
+# pour ne garder que la commmune de Rennes
+CommuneRennes <- Communes %>% filter(NOM_COM == "Rennes")
+
+# pour ne garder que les mutations correspondant à des appartements dans Rennes Métropole (dans un premier temps)
+MutationsApptRM <- MutationsRM %>% filter(type == "Appartement")
+
+# pour créer une liste d'années, dans l'ordre
+MutationsApptRM <- MutationsApptRM[order(MutationsApptRM$annee, decreasing = FALSE), ]
+ListAnnees <- unique(MutationsApptRM$annee)
+
+# pour définir comme emprise pour le lissage, l'étendue de Rennes avec une zone tampon de 0,5 km autour afin d'englober les mutations limitrophes et réduire l'effet de bord
+EmpriseRennes <- as.owin(st_buffer(st_geometry(CommuneRennes), 500))
+
+# Création d'une palette de couleurs
+cols <- c("#fff7f3", "#fee1d3", "#fcbea5", "#fc9777", "#fb7050", "#f14432", "#d42020", "#ad1016", "#67000d", "#480000", "#300000")
+```
+
+### Série de cartes lissées montrant l'évolution des prix au m² des appartements calculés directement à partir des mutations à Rennes
+
+```{r carto evol prix rennes, message = FALSE, warning = FALSE}
+# Paramétrage des marges pour insérer le titre général et les titres de chaque carte
+par(oma = c(3.5,0,3,0)+0.1, mar = c(0, 0.5, 1.2, 0.5))
+
+# pour découper la fenêtre en 2 lignes et 3 colonnes (6 années)
+par(mfrow = c(2,3))
+
+# boucle pour produire et cartographier une surface lissée par année 
+for (i in ListAnnees){
+
+  # Recuperation des jeux de données par année
+  fichier <- MutationsApptRM[which(MutationsApptRM$annee == i),]
+  
+  # pour récupérer les coordonnées des mutations
+  pts <- st_coordinates(st_geometry(fichier))
+  
+  # pour creer un objet ppp (format spatstat) et y integrer dedans l'emprise et les valeurs a lisser (prix au m²)
+  fichier.ppp <- ppp(pts[,1], pts[,2], window = EmpriseRennes, marks = fichier$prixm2)
+  
+  # pour calculer la surface lissee (rayon lissage : 500 m et resolution spatiale de l'image : 1000m²)
+  cartelissee <- Smooth(fichier.ppp, sigma = 500, weights = fichier.ppp$marks, eps = sqrt(1000))
+  
+  # Conversion de la surface lissée au format raster
+  cartelissee.raster <- rast(cartelissee)
+  crs(cartelissee.raster) <- st_crs(CommuneRennes)$srid # pour spécifier un SCR à l'objet raster
+  cartelissee.raster <- mask(cartelissee.raster, CommuneRennes) # découpage sur emprise Rennes
+  
+  # Définition manuelle des seuils
+  bks <- c(min(values(cartelissee.raster), na.rm = TRUE), 1500, 2000, 2200, 2400, 2800, 3000, 3200, 3500, 3800, max(values(cartelissee.raster), na.rm = TRUE))
+  
+  # reclassification de la surface lissée
+  cartelissee.reclass <- classify(cartelissee.raster, rcl = bks)
+  
+  # vectorisation de la surface reclassée
+  cartelissee.vecteur <- st_as_sf(as.polygons(cartelissee.reclass))
+  
+  # trier les valeurs
+  cartelissee.vecteur <- cartelissee.vecteur[order(cartelissee.vecteur$lyr.1, decreasing = FALSE), ]
+ 
+  # Tracer la carte
+  plot(st_geometry(CommuneRennes), border = "white", bg = "grey90")
+  
+  typoLayer(x = cartelissee.vecteur, var = "lyr.1", col = cols, lwd = 0.1,
+    border = NA, legend.pos = "n", add = TRUE)
+  
+  plot(st_geometry(IRISRM), border = adjustcolor("white", alpha.f = 0.5), lty = 3, lwd = 0.01, add = TRUE)
+  
+  title(main = paste("", i, sep = ""))
+  
+}
+
+barscale(lwd = 1.5, cex = 0.6, pos = "bottomright", style = "pretty", unit = "m")
+cartography::north(pos = "topleft")
+
+# Pour afficher le titre principal et la source
+mtext("Prix moyen en Euros au m² des appartements à Rennes de 2014 à 2019", cex = 1, side = 3, line = 1, adj = 0.5, outer = TRUE)
+mtext("   Sources : IGN et DGFip - Rayon de lissage : 500 m\n   et résolution : 1000 m²", side = 1, line = 1, adj = 0, cex = 0.6, outer = TRUE)
+
+# Affichage de la légende (dans une nouvelle fenêtre graphique)
+par(fig = c(0, 1, 0, 1), oma = c(0, 0, 0, 0), mar = c(0, 0, 0, 0), new = TRUE)
+plot.new()
+
+legendChoro(
+  pos = "bottomright",
+  title.txt = "",
+  breaks = bks, 
+  nodata = FALSE,
+  values.rnd = -1,
+  col = cols,
+  border = "white",
+  horiz = TRUE
+)
+```
+
+
+
