@@ -725,7 +725,7 @@ print(RecapCAHRegion)
 
 ### Graphique des variations à la moyenne
 
-```{r Graphique variations a la moyenne, warning=FALSE, message = FALSE, error=FALSE, echo=FALSE}
+```{r Graphique variations a la moyenne, warning=FALSE, message = FALSE, error=FALSE}
 SyntheseCAHRegion <- RecapCAHRegion %>% mutate(
   NbmutationBZH = mean(CommunesDVFClassif$NbMutations),
   SurfaceBZH = mean(CommunesDVFClassif$SurfaceMoyenne),
