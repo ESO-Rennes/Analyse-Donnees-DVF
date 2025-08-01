@@ -1,4 +1,4 @@
-Auteurs : <a href="https://perso.univ-rennes2.fr/boris.mericskay" target="_blank" rel="noopener"><strong>Boris Mericskay</strong></a> et <a href="https://perso.univ-rennes2.fr/florent.demoraes" target="_blank" rel="noopener"><strong>Florent Demoraes</strong></a> - Première version 2021 - <strong>Mise à jour le 24/10/2024</strong></a><br>
+Auteurs : <a href="https://perso.univ-rennes2.fr/boris.mericskay" target="_blank" rel="noopener"><strong>Boris Mericskay</strong></a> et <a href="https://perso.univ-rennes2.fr/florent.demoraes" target="_blank" rel="noopener"><strong>Florent Demoraes</strong></a> - Première version 2021 - <strong>Mise à jour le 11/06/2025</strong></a><br>
 </br>
 
 
