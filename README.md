@@ -1,4 +1,4 @@
-Auteurs : <a href="https://perso.univ-rennes2.fr/boris.mericskay" target="_blank" rel="noopener"><strong>Boris Mericskay</strong></a> et <a href="https://perso.univ-rennes2.fr/florent.demoraes" target="_blank" rel="noopener"><strong>Florent Demoraes</strong></a> - Première version 2021 - <strong>Mise à jour le 20/10/2025</strong></a><br>
+Auteurs : <a href="https://perso.univ-rennes2.fr/boris.mericskay" target="_blank" rel="noopener"><strong>Boris Mericskay</strong></a> et <a href="https://perso.univ-rennes2.fr/florent.demoraes" target="_blank" rel="noopener"><strong>Florent Demoraes</strong></a> - Première version 2021 - <strong>Mise à jour le 08/10/2026</strong></a><br>
 </br>
 
 
@@ -53,7 +53,7 @@ Ce quatrième script décrit plusieurs fonctions de manipulation de la dimension
 •	Données les plus récentes (5 dernières années) :
 https://files.data.gouv.fr/geo-dvf/latest/csv/
 
-•	Données d'archives (plus anciennes que celles des 5 dernières années) :
+•	Données d'archives (antérieures aux 5 dernières années) :
 http://files.opendatarchives.fr/cadastre.data.gouv.fr/data/etalab-dvf/latest/csv/ 
 
 
