@@ -1,0 +1,1133 @@
+---
+title: "DVF Script 3"
+author: "[Boris Mericskay](https://perso.univ-rennes2.fr/boris.mericskay) et [Florent
+  Demoraes](https://perso.univ-rennes2.fr/florent.demoraes)"
+date: "02/07/2021  - Mise à jour `r format(Sys.Date(), '%d/%m/%Y')`"
+output:
+  word_document:
+    toc: true
+    number_sections: true
+  html_document:
+    toc: true
+    toc_float:
+      collapsed: true
+      smooth_scroll: true
+    number_sections: true
+  pdf_document:
+    toc: true
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  eval = !knitr::is_latex_output() && !identical(knitr::pandoc_to(), "docx"),
+  message = FALSE, warning = FALSE
+)
+```
+
+# LES DONNÉES DVF EN CARTES POUR SAISIR LES GRANDES TENDANCES SPATIALES DE L'IMMOBILIER
+
+Ce script décrit plusieurs fonctions de manipulation de la dimension spatiale des données DVF. Il propose aussi plusieurs formes de représentation cartographique de ces données à une échelle régionale (Bretagne).
+
+## Chargement des packages nécessaires
+
+```{r loading package}
+library(tidyverse) # Manipulation de données
+library(sf) # Manipulation de données spatiales
+library(mapsf) # Cartographie thématique
+library(spdep) # pour calculer l'auto-corrélation spatiale
+library(spatstat) # pour produire des surfaces lissées
+library(terra) # pour le traitement de données raster
+library(cartogramR) # pour créer des cartogrammes contigus
+library(rmapshaper) # pour généraliser les contours
+library(cluster) # CAH
+library(data.table) # pour manipuler des tables volumineuses et réaliser des agrégations avec une performance accrue
+library(tanaka) # pour élaborer des cartes selon la méthode des contours de relief
+library(linemap) # pour élaborer des cartes en stalagmites avec un figuré en lignes de crête
+library(sfarrow) # pour lire et écrire des fichiers geoparquets
+```
+
+## Import du jeu de données brut
+
+```{r Import donnees}
+# import du fichier csv avec la fonction fastread du package data.table
+DVFOK <- fread("Resultats/DVFOK.csv") 
+```
+
+## Création d'un semis de points correspondant aux mutations et reprojection
+
+### Transformer le tableau des mutations en couche spatiale (objet sf) à partir des coordonnées XY
+
+```{r creation objet spatial}
+DVFgeo <- st_as_sf(DVFOK, coords = c("longitude","latitude"), crs = 4326)
+# Paramétrage des marges de la fenêtre pour maximiser l'emprise de la carte
+op <- par(mar = c(0, 0, 1.2, 0))
+plot(st_geometry(DVFgeo), pch = ".", cex = 0.01)
+par(op) # pour réinitialiser les paramètres de la fenêtre graphique
+```
+
+### Reprojeter la couche des mutations DVF en Lambert 93
+
+```{r reprojection}
+DVFgeo <- st_transform(DVFgeo, 2154)
+```
+
+### Exporter le semis de points des mutations au format geoparquet (écriture très rapide)
+
+```{r export geoparquet DVFgeo}
+# pour créer un dossier (s'il n'existe pas déjà)
+dir.create("Resultats")
+st_write_parquet(DVFgeo, "Resultats/Mutations_Bzh.parquet")
+```
+
+## Ajout de couches géographiques externes pour les analyses/cartes
+
+### Importer la couche des départements et la reprojeter en Lambert 93
+
+```{r import dpts}
+departements <- st_read("Donnees/DEPARTEMENT.shp") # Source : Admin Express IGN (France entière)
+departements <- st_transform(departements, 2154)
+```
+
+### Importer la couche des communes de Bretagne
+
+```{r import communes}
+Communes <- st_read("Donnees/Communes.shp") # source : Admin Express IGN (Bretagne)
+```
+
+### Fusion des communes pour récuperer les contours des départements bretons
+
+```{r fusion communes}
+depBZH <- Communes %>% group_by(INSEE_DEP) %>% summarize()
+plot(depBZH["INSEE_DEP"])
+```
+
+## Agrégations spatiales
+
+### Dénombrement des mutations par commune (jointure spatiale et comptage)
+
+```{r calcul nb mutations par commune}
+Communes <- Communes %>% mutate(NbMutations = lengths(st_intersects(Communes, DVFgeo)))
+sum(Communes$NbMutations) # nb total de mutations
+```
+
+### Carte du nombre de mutations par commune
+
+```{r Carte du nombre de mutations par commune}
+# Paramétrage des marges de la fenêtre pour maximiser l'emprise de la carte
+op <- par(mar = c(0, 0, 1.2, 0))
+
+# sélection des communes dont le nom sera affiché sur la carte
+liste_noms <- c("Rennes", "Redon", "Vannes", "Lorient", "Quimper", "Brest", "Morlaix", "Lannion", "Saint-Brieuc", "Saint-Malo")
+Selection_Communes <- Communes[Communes$NOM_COM %in% liste_noms, ]
+
+# Affichage de tous les départements en arrière-plan, en centrant la carte sur la région Bretagne
+plot(st_geometry(departements), col = "grey90", border = NA, bg = "#B5D0D0", xlim = c(st_bbox(Communes)[1], st_bbox(Communes)[3]), ylim = c(st_bbox(Communes)[2], st_bbox(Communes)[4]))
+
+# Ajout des departements de la région
+plot(st_geometry(depBZH), lwd = 1, col = NA, border = "grey50", add = TRUE)
+
+# Affichage des symboles proportionnels (nombre de mutations)
+mf_map(x = Communes,
+       type = "prop",
+          var = "NbMutations", # variable à cartographier
+          col = "#e5478e", # couleur des cercles
+          border = "white",  # couleur du contour des cercles
+          inches = 0.2, # taille du cercle max
+          lwd = 0.01, # épaisseur du contour des cercles
+          leg_title = "Nombre de mutations \nDVF par commune", leg_pos = "bottomleft")
+
+# Ajouter les étiquettes des communes sélectionnées plus haut
+mf_label(Selection_Communes, var = "NOM_COM", halo = TRUE, bg = "white", r = 0.05, cex = 0.7, pos = 3, font = 4, offset = 0)
+
+# Habillage de la carte
+mf_title("Nombre de mutations par commune en Bretagne (2014-2019)", cex = 0.8, tab = TRUE, fg = "white", bg = "black", line = 1, pos = "left")
+
+mf_arrow(adj = c(1,-3))
+mf_scale()
+
+mf_credits(txt = "          IGN et DGFip, 2021", cex = 0.5, pos = 'rightbottom')
+
+par(op) # pour réinitialiser les paramètres de la fenêtre graphique
+```
+
+### Dénombrement du nombre de mutations de maisons et d'appartements par commune
+
+```{r calcul nb maisons et appts par commune}
+Maisons <- DVFgeo %>% 
+  filter(type == 'Maison')
+
+Appartements <- DVFgeo %>% 
+  filter(type == "Appartement")
+
+Communes <- Communes %>% 
+  mutate(NbMaisons = lengths(st_intersects(Communes, Maisons))) %>% 
+  mutate(NbAppart = lengths(st_intersects(Communes, Appartements)))
+```
+
+### Carte du nombre de ventes de maisons par commune
+
+```{r Carte ventes de maisons par commune}
+# Paramétrage des marges de la fenêtre pour maximiser l'emprise de la carte
+op <- par(mar = c(0, 0, 1.2, 0))
+
+# Affichage de tous les départements en arrière-plan, en centrant la carte sur la région Bretagne
+plot(st_geometry(departements), col = "grey90", border = NA, bg = "#B5D0D0", xlim = c(st_bbox(Communes)[1], st_bbox(Communes)[3]), ylim = c(st_bbox(Communes)[2], st_bbox(Communes)[4]))
+
+# Ajout des departements de la région
+plot(st_geometry(depBZH), lwd = 1, col = NA, border = "grey50", add = TRUE)
+
+# Affichage des symboles proportionnels (nombre de mutations de maisons)
+mf_map(x = Communes,
+       type = "prop",
+          var = "NbMaisons", # variable à cartographier
+          col = "#2ECC40", # couleur des cercles
+          border = "white",  # couleur du contour des cercles
+          inches = 0.15, # taille du cercle max
+          lwd = 0.01, # épaisseur du contour des cercles
+          leg_title = "Ventes de maisons \npar commune", leg_pos = "bottomleft")
+
+# Ajouter les étiquettes des communes sélectionnées plus haut
+mf_label(Selection_Communes, var = "NOM_COM", halo = TRUE, bg = "white", r = 0.05, cex = 0.7, pos = 3, font = 4, offset = 0)
+
+# Habillage de la carte
+mf_title("Nombre de ventes de maisons par commune en Bretagne (2014-2019)", cex = 0.8, tab = TRUE, fg = "white", bg = "black", line = 1, pos = "left")
+
+mf_arrow(adj = c(1,-3))
+mf_scale()
+
+mf_credits(txt = "          IGN et DGFip, 2021", cex = 0.5, pos = 'rightbottom')
+
+par(op) # pour réinitialiser les paramètres de la fenêtre graphique
+```
+
+### Carte du nombre de ventes d'appartements par commune
+
+```{r Carte ventes appartements par commune, message = FALSE}
+# Paramétrage des marges de la fenêtre pour maximiser l'emprise de la carte
+op <- par(mar = c(0, 0, 1.2, 0))
+
+# Affichage de tous les départements en arrière-plan, en centrant la carte sur la région Bretagne
+plot(st_geometry(departements), col = "grey90", border = NA, bg = "#B5D0D0", xlim = c(st_bbox(Communes)[1], st_bbox(Communes)[3]), ylim = c(st_bbox(Communes)[2], st_bbox(Communes)[4]))
+
+# Ajout des departements de la région
+plot(st_geometry(depBZH), lwd = 1, col = NA, border = "grey50", add = TRUE)
+
+# Affichage des symboles proportionnels (nombre de mutations d'appartements)
+mf_map(x = Communes,
+       type = "prop",
+          var = "NbAppart", # variable à cartographier
+          col = "#F012BE", # couleur des cercles
+          border = "white",  # couleur du contour des cercles
+          inches = 0.2, # taille du cercle max
+          lwd = 0.01, # épaisseur du contour des cercles
+          leg_title = "Ventes d'appartements \npar commune", 
+       leg_pos = "bottomleft")
+
+# Ajouter les étiquettes des communes sélectionnées plus haut
+mf_label(Selection_Communes, var = "NOM_COM", halo = TRUE, bg = "white", r = 0.05, cex = 0.7, pos = 3, font = 4, offset = 0)
+
+# Habillage de la carte
+mf_title("Nombre de ventes d'appartements par commune en Bretagne (2014-2019)", cex = 0.8, tab = TRUE, fg = "white", bg = "black", line = 1, pos = "left")
+
+mf_arrow(adj = c(1,-3))
+mf_scale()
+
+mf_credits(txt = "          IGN et DGFip, 2021", cex = 0.5, pos = 'rightbottom')
+
+par(op) # pour réinitialiser les paramètres de la fenêtre graphique
+```
+
+### Calcul du prix nominal moyen, du prix moyen au m² et de la surface moyenne par commune
+
+```{r calcul-indicateurs-communes}
+# pour récupérer l'id des communes sur chaque mutation
+DVFgeo.tmp <- st_join(DVFgeo, Communes["INSEE_COM"]) |>
+  st_drop_geometry()
+
+# pour calculer le prix nominal moyen, le prix moyen au m2 et la surface moyenne des mutations par commune (on utilise ici le package data.table pour optimiser le temps de calcul)
+setDT(DVFgeo.tmp)  # Convertir le dataframe en data.table
+
+communes.enrichies <- DVFgeo.tmp[, .(
+  Nb_Mutations   = .N,
+  PrixMoyen      = round(mean(prix, na.rm = TRUE)),
+  Prixm2Moyen    = round(mean(prixm2, na.rm = TRUE)),
+  SurfaceMoyenne = round(mean(surface, na.rm = TRUE))
+), by = INSEE_COM]
+
+# pour récupérer les nouvelles variables dans la couche des communes initiales
+Communes <- merge(Communes, communes.enrichies, by = "INSEE_COM")
+rm(communes.enrichies, DVFgeo.tmp)
+```
+
+### Carte du prix moyen au m² des mutations par commune
+
+```{r Carte prix moyen au m2 des mutations par commune}
+# Paramétrage des marges de la fenêtre pour maximiser l'emprise de la carte
+op <- par(mar = c(0, 0, 1.2, 0))
+
+# Affichage de tous les départements en arrière-plan, en centrant la carte sur la région Bretagne
+plot(st_geometry(departements), col = "grey90", border = NA, bg = "#B5D0D0", xlim = c(st_bbox(Communes)[1], st_bbox(Communes)[3]), ylim = c(st_bbox(Communes)[2], st_bbox(Communes)[4]))
+
+mf_map(
+  x = Communes,
+  var = "Prixm2Moyen",
+  type = "choro",
+  breaks = c(300, 1000, 1500, 2000, 2500, 5000),
+  pal = c("#1a9641", "#a6d96a", "#ffffbf", "#fdae61", "#d7191c"),
+  lwd = 0.001,
+  border = "grey90",
+  leg_title = "Prix moyen/m² \n(Euros)", 
+  leg_pos = "bottomleft",
+  leg_box_border = "#B5D0D0",
+  leg_no_data = "",
+  col_na = NA,
+  leg_val_rnd = 0,
+  leg_title_cex = 0.6,
+  leg_val_cex = 0.4,
+  leg_size = 0.7,
+  add = TRUE
+)
+
+# Ajout des départements de la région
+plot(st_geometry(depBZH), lwd = 1, col = NA, border = "grey20", add = TRUE)
+
+# Ajouter les étiquettes des communes sélectionnées plus haut
+mf_label(Selection_Communes, var = "NOM_COM", halo = TRUE, bg = "white", r = 0.05, cex = 0.7, pos = 3, font = 4, offset = 0)
+
+# Habillage de la carte
+mf_title("Prix moyen au m² des mutations, par commune en Bretagne (2014-2019)", cex = 0.8, tab = TRUE, fg = "white", bg = "black", line = 1, pos = "left")
+
+mf_arrow(adj = c(1,-3))
+mf_scale()
+
+mf_credits(txt = "          IGN et DGFip, 2021", cex = 0.5, pos = 'rightbottom')
+
+par(op) # pour réinitialiser les paramètres de la fenêtre graphique
+```
+
+### Carte du prix nominal moyen des mutations par commune
+
+```{r carte prix nominal moyen}
+# Paramétrage des marges de la fenêtre pour maximiser l'emprise de la carte
+op <- par(mar = c(0, 0, 1.2, 0))
+
+# Affichage de tous les départements en arrière-plan, en centrant la carte sur la région Bretagne
+plot(st_geometry(departements), col = "grey90", border = NA, bg = "#B5D0D0", xlim = c(st_bbox(Communes)[1], st_bbox(Communes)[3]), ylim = c(st_bbox(Communes)[2], st_bbox(Communes)[4]))
+
+options("scipen" = 100)  # permet de convertir les chiffres initialement sous forme d'exposants en chiffres décimaux standard (utile pour l'affichage des valeurs en légende)
+
+mf_map(
+  x = Communes,
+  var = "PrixMoyen",
+  type = "choro",
+  breaks = c(40000, 100000, 140000, 160000, 200000, 500000),
+  pal = c("#2166ac","#67a9cf", "#fddbc7","#f4a582","#ca0020"),
+  lwd = 0.001,
+  border = "grey90",
+  leg_title = "Prix nominal \nmoyen (Euros)", 
+  leg_pos = "bottomleft",
+  leg_box_border = "#B5D0D0",
+  leg_no_data = "",
+  col_na = NA,
+  leg_val_rnd = 0,
+  leg_title_cex = 0.6,
+  leg_val_cex = 0.4,
+  leg_size = 0.7,
+  add = TRUE
+)
+
+# Ajout des départements de la région
+plot(st_geometry(depBZH), lwd = 1, col = NA, border = "grey20", add = TRUE)
+
+# Ajouter les étiquettes des communes sélectionnées plus haut
+mf_label(Selection_Communes, var = "NOM_COM", halo = TRUE, bg = "white", r = 0.05, cex = 0.7, pos = 3, font = 4, offset = 0)
+
+# Habillage de la carte
+mf_title("Prix nominal moyen des mutations par commune en Bretagne (2014-2019)", cex = 0.8, tab = TRUE, fg = "white", bg = "black", line = 1, pos = "left")
+
+mf_arrow(adj = c(1,-3))
+mf_scale()
+
+mf_credits(txt = "          IGN et DGFip, 2021", cex = 0.5, pos = 'rightbottom')
+```
+
+### Export des communes enrichies et des départements bretons au format geopackage (pour une utilisation dans un SIG par exemple)
+
+```{r export gpkg}
+st_write(Communes, "Resultats/CommunesBZHDVF.gpkg", append = FALSE)
+st_write(depBZH, "Resultats/DepartementsBZH.gpkg", append = FALSE)
+```
+
+### Partitionnement régulier de l'espace et calcul du prix moyen au m² dans ce découpage
+
+#### Création d'un carroyage avec des mailles de 2 km de côté
+
+```{r carroyage}
+# Paramétrage des marges de la fenêtre pour maximiser l'emprise de la carte
+op <- par(mar = c(0, 0, 1.5, 0))
+
+grille <- st_make_grid(
+  Communes,
+  cellsize = 2000, 
+  crs = 2154,
+  what = "polygons",
+  square = TRUE)
+
+# Création d'un identifiant unique par maille
+grille <- st_as_sf(grille)
+grille <- grille %>% mutate(IDOK = row_number())
+
+# Paramétrage des marges de la fenêtre pour maximiser l'emprise de la carte
+par(mar = c(0, 0, 1.2, 0))
+
+plot(st_geometry(grille), border = "grey90", lwd = 0.01, lty = 3)
+plot(st_geometry(depBZH), lwd = 1, border = "red", add = TRUE)
+
+par(op) # pour réinitialiser les paramètres de la fenêtre graphique
+```
+
+#### Calcul du nombre de mutations et du prix moyen au m² par maille
+
+```{r calcul nb mutations et prix moyen par maille}
+# pour récupérer l'id des mailles sur chaque mutation (jointure spatiale)
+DVFgeobis <- st_join(DVFgeo, grille["IDOK"]) |>
+  st_drop_geometry()
+
+# pour calculer le nombre de mutations et leur prix moyen par maille (on utilise ici à nouveau le package data.table pour optimiser le temps de calcul)
+setDT(DVFgeobis)  # Convertir le dataframe en data.table
+grille.enrichie <- DVFgeobis[, .(Nb_Mutations = .N, 
+                                 prixm2moyen = round(mean(prixm2))), 
+                             by = IDOK]
+
+# jointure attributaire pour récupérer les résultats dans la grille sf
+grillem2 <- merge(grille, grille.enrichie, by = "IDOK", all = TRUE) 
+rm(DVFgeobis, grille.enrichie)
+```
+
+#### Carte du prix au m² moyen de l'immobilier par maille de 2km
+
+```{r Carte du prix au m2 moyen de immobilier par maille}
+# Paramétrage des marges de la fenêtre pour maximiser l'emprise de la carte
+op <- par(mar = c(0, 0, 1.5, 0))
+
+# Affichage de tous les départements en arrière-plan, en centrant la carte sur la région Bretagne
+plot(st_geometry(departements), col = "grey90", border = NA, bg = NA, xlim = c(st_bbox(Communes)[1], st_bbox(Communes)[3]), ylim = c(st_bbox(Communes)[2], st_bbox(Communes)[4]))
+
+mf_map(
+  x = grillem2,
+  var = "prixm2moyen",
+  type = "choro",
+  breaks = c(300, 1000, 1500, 2000, 2500, 5000),
+  pal = c("#1a9641", "#a6d96a", "#ffffbf", "#fdae61", "#d7191c"),
+  lwd = 0.001,
+  border = NA,
+  leg_title = "Prix moyen/m² \n(Euros)", 
+  leg_pos = "bottomleft",
+  leg_box_border = "#B5D0D0",
+  leg_no_data = "Aucune mutation",
+  col_na = NA,
+  leg_val_rnd = 0,
+  leg_title_cex = 0.6,
+  leg_val_cex = 0.4,
+  leg_size = 0.7,
+  add = TRUE
+)
+
+# Ajout des départements de la région
+plot(st_geometry(depBZH), lwd = 1, col = NA, border = "grey20", add = TRUE)
+
+# Ajouter les étiquettes des communes sélectionnées plus haut
+mf_label(Selection_Communes, var = "NOM_COM", halo = TRUE, bg = "white", r = 0.05, cex = 0.7, pos = 3, font = 4, offset = 0)
+
+# Habillage de la carte
+mf_title("Prix moyen au m² des mutations par maille de 2 km en Bretagne (2014-2019)", cex = 0.8, tab = TRUE, fg = "white", bg = "black", line = 1, pos = "left")
+
+mf_arrow(adj = c(1,-3))
+mf_scale()
+
+mf_credits(txt = "          IGN et DGFip, 2021", cex = 0.5, pos = 'rightbottom')
+
+par(op) # pour réinitialiser les paramètres de la fenêtre graphique
+```
+
+### Export du carroyage au format geopackage
+
+```{r export gpkg 2}
+st_write(grillem2, "Resultats/grillem2.gpkg", append = FALSE) # pour une utilisation dans un SIG par exemple
+```
+
+## Lissage spatial et cartes des volumes (méthode optimisée, en mode raster)
+
+### Lissage spatial des prix de l'immobilier au m² calculés à partir des valeurs agrégées par commune
+
+#### Calcul des distances au plus proche voisin et de l'auto-corrélation spatiale des prix au m² (1ère exploration pour déterminer le rayon de lissage)
+
+```{r calcul dist ppv et autocorrelation spatiale 1}
+# pour calculer les pseudo-centroides des communes (indispensable pour le calcul de la distance au plus proche voisin)
+CommunesBZHDVFCentroids <- st_point_on_surface(Communes)
+
+# Identification du plus proche voisin de chaque commune (fonction spdep)
+listPPV <- knearneigh(CommunesBZHDVFCentroids, k = 1)
+
+# pour convertir l'objet précédent (knn) en objet nb (fonction spdep)
+PPV <- knn2nb(listPPV, row.names = CommunesBZHDVFCentroids$INSEE_COM) 
+
+# pour connaître la distance qui sépare chaque point à son plus proche voisin
+distPPV <- nbdists(PPV, CommunesBZHDVFCentroids) 
+
+# Pour afficher un résumé statistique et l'histogramme des distances au plus proche voisin
+summary(unlist(distPPV))
+hist(unlist(distPPV), breaks = 20,
+     main = "Distance au plus proche voisin",
+     col = "black", border = "white", xlab = "Distance", ylab = "Fréquence")
+
+# pour convertir les communes en objet nb (indispensable pour le calcul de l'indice de Moran)
+nbCom <- poly2nb(pl = Communes,
+                 snap = 50,
+                 queen = TRUE)
+
+# pour identifier les communes sans voisins topologiques (regions with no links), c'est-à-dire les îles
+summary(nbCom)
+
+# création d'une liste des communes sans voisins qui correspondent aux îles (à partir de l'indice des lignes)
+Iles <- which(card(nbCom) == 0)
+
+# suppression des îles sans quoi le calcul de l'indice de Moran n'est pas possible
+CommunesBZHDVF <- Communes[-Iles, ]
+
+# pour reconvertir les communes (sans les îles) en objet nb
+nbCom <- poly2nb(pl = CommunesBZHDVF,
+                 snap = 50,
+                 queen = TRUE)
+
+#calcul du test de Moran
+print(moran.test(CommunesBZHDVF$Prixm2Moyen, 
+                 listw = nb2listw(nbCom)))
+```
+
+#### Carte lissée des prix de l'immobilier au m² calculés à partir des valeurs agrégées par commune sur l'ensemble de la Bretagne
+
+```{r Carte lissee des prix m2 agreges par commune avec methode optimisee avec terra}
+# pour convertir les objets sf en objets terra
+Emprise <- vect(CommunesBZHDVF)
+Centroids <- vect(CommunesBZHDVFCentroids)
+
+# pour créer le raster qui servira de support aux calculs
+r0 <- rast(Emprise, resolution = 500)
+
+# pour "rasteriser" les prix au m² des pseudo-centroïdes
+valeurs <- rasterize(Centroids, r0, field = "Prixm2Moyen", fun = "first")
+presence <- ifel(is.na(valeurs), 0, 1)   # 1 là où il y a un point, 0 ailleurs. ifel est la fonction terra équivalente à ifelse et est adaptée aux objets rasters
+valeurs  <- ifel(is.na(valeurs), 0, valeurs)
+# Ici, seuls les pixels contenant les centroïdes des communes ont un prix moyen au m², tous les autres reçoivent la valeur 0.
+
+# calcul de la matrice des poids des pixels qui va décroissant avec la distance et la fonction de lissage (fonction terra)
+matrice_poids <- focalMat(r0, d = 5000, type = "Gauss")
+
+# pour calculer le numérateur et le dénominateur du lissage
+num <- focal(valeurs,  
+             w = matrice_poids, 
+             fun = "sum", 
+             fillvalue = 0)
+
+den <- focal(presence, 
+             w = matrice_poids, 
+             fun = "sum", 
+             fillvalue = 0)
+
+# pour obtenir la surface lissée et la restreindre au contour de la Bretagne
+cartelissee.raster <- mask(num / den, Emprise)
+names(cartelissee.raster) <- "Prixm2Lisse"
+
+# Paramétrage des marges de la fenêtre pour maximiser l'emprise de la carte
+op <- par(mar = c(0, 0, 1.2, 2))
+
+# pour afficher la surface lissée et habiller la carte
+# Calcul des seuils
+bks <- unique(mf_get_breaks(values(cartelissee.raster), breaks = "q6"))
+
+# Création d'une palette de couleurs (double gradation harmonique)
+cols <- c("#2a9c4e", "#77c35c", "#c4e687", "#ffffc0", "#fec981", "#dc292c")
+
+# Affichage de tous les départements en arrière-plan, en centrant la carte sur la région Bretagne
+plot(st_geometry(departements), col = "grey90", border = NA, bg = "#B5D0D0", xlim = c(st_bbox(Communes)[1], st_bbox(Communes)[3]), ylim = c(st_bbox(Communes)[2], st_bbox(Communes)[4]))
+
+# Affichage de la surface lissée
+plot(cartelissee.raster, breaks = bks, col = cols, add = T, legend = F)
+plot(st_geometry(depBZH), border = "grey", lwd = 0.05, lty = 3, add = T)
+
+# Ajouter les étiquettes des communes sélectionnées plus haut
+mf_label(Selection_Communes, var = "NOM_COM", halo = TRUE, bg = "white", r = 0.05, cex = 0.7, pos = 3, font = 4, offset = 0)
+
+mf_legend(type = "choro",
+          pos = "bottomleft",
+          title = "Prix moyen \nau m²",
+          val = bks,
+          no_data = FALSE,
+          val_rnd = -1,
+          pal = cols,
+          size = 0.7)
+
+# Habillage de la carte
+mf_title("Prix moyen au m² de l'immobilier par commune en Bretagne entre 2014 et 2019", cex = 0.8, tab = TRUE, fg = "white", bg = "black", line = 1, pos = "left")
+
+mf_arrow(adj = c(1,-3))
+mf_scale()
+
+mf_credits(txt = "          IGN et DGFip, 2021", cex = 0.5, pos = 'rightbottom')
+
+par(op) # pour réinitialiser les paramètres de la fenêtre graphique
+```
+
+### Lissage spatial des prix de l'immobilier au m² calculés directement à partir des mutations immobilières
+
+#### Calcul des distances au plus proche voisin et de l'auto-corrélation spatiale des prix au m²
+
+```{r calcul dist ppv et autocorrelation spatiale 2}
+
+# Convertir l'objet sf en un objet spatstat de type ppp (utile pour calculer les distances au plus proche voisin et l'indice du plus proche voisin)
+# Extraire les coordonnées des points
+coords <- st_coordinates(DVFgeo)
+
+# Définir l'emprise où se trouvent les points (fonction spatstat)
+emprise <- as.owin(st_bbox(DVFgeo))
+
+# Créer un objet ppp (format spatstat)
+points_ppp <- ppp(coords[,1], coords[,2], window = emprise)
+
+# Calculer la distance au plus proche voisin (PPV) pour chaque point (fonction spatstat)
+distances_au_PPV <- round(nndist(points_ppp))
+
+# Histogramme des distances au plus proche voisin
+hist(distances_au_PPV, nclass = 500,
+     main = "Distance au plus proche voisin",
+     col = "black", border = "white", xlab = "Distance", ylab = "Fréquence", xlim = c(0,400))
+
+# Récupérer l'identifiant du plus proche voisin (PPV) de chaque point
+id_PPV <- nnwhich(points_ppp)
+df_PPV <- as.data.frame(id_PPV)
+df_PPV$id <- as.integer(rownames(df_PPV))
+df_PPV <- df_PPV[ , c("id", "id_PPV")] # pour réagencer les colonnes
+View(df_PPV)
+
+# Créer une liste dans laquelle chaque élément contient l'indice du PPV (format requis pour le calcul de l'indice de Moran avec le package spdep)
+PPV <- split(df_PPV$id_PPV, df_PPV$id)
+
+# Attribuer la classe "nb" à l'objet précédent (classe requise pour le calcul de l'indice de Moran avec le package spdep)
+class(PPV) <- "nb"
+
+# calcul du test de Moran (fonction spdep)
+print(moran.test(DVFgeo$prixm2, 
+                 listw = nb2listw(PPV)))
+
+```
+
+
+#### Carte lissée des prix de l'immobilier au m² calculés directement à partir des mutations immobilières sur l'ensemble de la Bretagne
+
+
+```{r carte prix lisses calcules a partir mutations en mode raster}
+
+# pour convertir les objets sf en objets terra (SpatVector)
+pts <- vect(DVFgeo)
+
+# pour créer le raster (SpatRaster) qui servira de support aux calculs
+r0  <- rast(pts, resolution = 500)
+
+# pour "rasteriser" les prix au m² des mutations 
+nb  <- rasterize(pts, r0, fun = "count")  # nombre de mutations dans un même pixel
+moy <- round(rasterize(pts, r0, field = "prixm2", fun = "mean")) # moyenne (si plusieurs points dans un même pixel)
+names(nb) <- "Nb_Mutations"
+names(moy) <- "prixm2moyen"
+
+# affichage des deux variables
+plot(c(nb, moy),
+     col  = hcl.colors(5, "Inferno", rev = TRUE),
+     axes = FALSE,
+     mar  = c(1, 1, 2, 4))
+
+# calcul de la matrice des poids des pixels qui va décroissant avec la distance et la fonction de lissage (fonction terra)
+matrice_poids2 <- focalMat(r0, d = 2000, type = "Gauss")
+
+# définition des valeurs prises par les pixels (remplacement des NA par des 0)
+presence <- ifel(is.na(moy), 0, 1)
+valeurs  <- ifel(is.na(moy), 0, moy)
+
+# calcul du numérateur et du dénominateur
+num <- focal(valeurs,  
+             w = matrice_poids2, 
+             fun = "sum", 
+             fillvalue = 0)
+
+den <- focal(presence, 
+             w = matrice_poids2, 
+             fun = "sum", 
+             fillvalue = 0)
+
+# calcul du lissage spatial
+grille_lissee_prix_m2 <- num / den
+
+# découpage du raster pour ne garder que la partie située sur l'emprise de la Bretagne
+grille_lissee_prix_m2 <- mask(grille_lissee_prix_m2, vect(depBZH))
+
+# pour afficher la surface lissée et définir l'habillage de la carte
+# Calcul des seuils
+bks <- unique(mf_get_breaks(values(grille_lissee_prix_m2), breaks = "q6"))
+
+# Création d'une palette de couleurs (double gradation harmonique)
+cols <- c("#2a9c4e", "#77c35c", "#c4e687", "#ffffc0", "#fec981", "#dc292c")
+
+# sélection des communes dont le nom sera affiché sur la carte
+liste_noms <- c("Rennes", "Redon", "Vannes", "Lorient", "Quimper", "Brest", "Morlaix", "Lannion", "Saint-Brieuc", "Saint-Malo")
+Selection_Communes <- Communes[which(Communes$NOM_COM %in% liste_noms), ]
+
+#paramétrage de la fenêtre graphique
+op <- par(mar = c(0,0,1.5,2))
+
+# Affichage des départements de la Bretagne et des départements limitrophes en arrière-plan, en centrant la carte sur la région Bretagne
+plot(st_geometry(departements), col = "grey80", border = NA, bg = "#B5D0D0", xlim = c(st_bbox(depBZH)[1], st_bbox(depBZH)[3]), ylim = c(st_bbox(depBZH)[2], st_bbox(depBZH)[4]))
+
+# Affichage de la surface lissée
+plot(grille_lissee_prix_m2, breaks = bks, col = cols, legend = FALSE, axes = FALSE, add = TRUE)
+plot(st_geometry(depBZH), border = "grey30", lwd = 0.2, lty = 3, add = T)
+
+# Ajouter les étiquettes des communes sélectionnées plus haut
+mf_label(Selection_Communes, var = "NOM_COM", halo = TRUE, bg = "white", r = 0.05, cex = 0.6, pos = 3, font = 4, offset = 0.5)
+
+# Habillage de la carte
+mf_title("Prix moyen au m² de l'immobilier en Bretagne (2014-2019)", cex = 0.8, tab = TRUE, fg = "white", bg = "black", line = 1, pos = "left")
+
+mf_scale()
+
+mf_arrow(pos = "topright", adj = c(-1,-3))
+
+mf_legend(type = "choro",
+          pos = "bottomleft",
+          title = "Prix moyen \nau m²",
+          val = bks,
+          no_data = FALSE,
+          val_rnd = -1,
+          pal = cols,
+          size = 0.7)
+
+mf_credits(txt = "          IGN et DGFip, 2021", cex = 0.5, pos = 'rightbottom')
+
+# Ajout d'une indication sur la méthode de calcul en marge de la carte
+mtext("Prix moyens calculés à partir des mutations\nagrégées par maille de 25 ha.", side = 3, line = -1.5, adj = 0.03, cex = 0.5)
+
+par(op) # pour réinitialiser les paramètres graphiques
+
+```
+
+
+#### Carte lissée des prix de l'immobilier au m² avec isolignes sur l'ensemble de la Bretagne (variante)
+
+```{r carte prix lisses calcules a partir mutations en mode raster avec isolignes}
+
+# Pour rajouter des contours avec les valeurs sur les isolignes
+
+#paramétrage de la fenêtre graphique
+op <- par(mar = c(0,0,1.5,0))
+
+# Affichage des départements de la Bretagne et des départements limitrophes en arrière-plan, en centrant la carte sur la région Bretagne
+plot(st_geometry(departements), col = "grey80", border = NA, bg = "#B5D0D0", xlim = c(st_bbox(depBZH)[1], st_bbox(depBZH)[3]), ylim = c(st_bbox(depBZH)[2], st_bbox(depBZH)[4]))
+
+# Affichage de la surface lissée
+plot(grille_lissee_prix_m2, breaks = bks, col = cols, legend = FALSE, axes = FALSE, add = TRUE)
+
+# Affichage des isolignes avec leur valeur
+contour(grille_lissee_prix_m2, lwd = 0.5, lty = 3, add = TRUE)
+
+# Habillage de la carte
+mf_title("Prix moyen au m² de l'immobilier en Bretagne (2014-2019)", cex = 0.8, tab = TRUE, fg = "white", bg = "black", line = 1, pos = "left")
+
+mf_scale()
+
+mf_arrow(pos = "topright", adj = c(-1,-3))
+
+mf_legend(type = "choro",
+          pos = "bottomleft",
+          title = "Prix moyen \nau m²",
+          val = bks,
+          no_data = FALSE,
+          val_rnd = -1,
+          pal = cols,
+          size = 0.7)
+
+mf_credits(txt = "          IGN et DGFip, 2021", cex = 0.5, pos = 'rightbottom')
+
+# Ajout d'une indication sur la méthode de calcul en marge de la carte
+mtext("Prix moyens calculés à partir des mutations\nagrégées par maille de 25 ha.", side = 3, line = -1.5, adj = 0.03, cex = 0.5)
+
+par(op) # pour réinitialiser les paramètres graphiques
+
+
+```
+
+### Carte du volume des mutations sous forme de contour de relief (méthode de Tanaka)
+
+```{r tanaka}
+
+# noyau circulaire (rayon 2000 m) : matrice de 0/1, sans pondération
+matrice_poids3 <- focalMat(r0, d = 2000, type = "circle")
+matrice_poids3[matrice_poids3 > 0] <- 1
+
+# nombre de mutations par pixel (NA remplacés par 0)
+nb <- subst(rasterize(pts, r0, fun = "count"), NA, 0)
+
+# nombre de mutations dans la fenêtre circulaire de 2000 m autour de chaque pixel
+nb_points <- focal(nb, w = matrice_poids3, fun = "sum", fillvalue = 0)
+
+# découpage du raster correspondant au nombre de mutations, sur l'emprise de la Bretagne
+nb_points <- mask(nb_points, depBZH)
+
+# Histogramme et définition des seuils pour la discrétisation
+hist(terra::values(nb_points), nclass = 100, xlim = c(0,2000))
+bks <- c(0,1,10,120,200,250,300,400,600,1000,2000,4000,8000,max(values(nb_points), na.rm = TRUE))
+
+#paramétrage de la fenêtre graphique
+op <- par(mar = c(0,0,1.5,0), bg = "ivory2")
+
+# définition d'une palette de couleurs
+palette <- hcl.colors(n = length(bks)-1, palette = "RdYlBu", rev = TRUE)
+
+#Affichage de la carte en contour de relief (/!\ UN PEU LONG)
+tanaka(x = nb_points,
+       breaks = bks,
+       col = palette,
+       shift = 500,
+       mask = depBZH,
+       legend.pos = NA)
+
+# Ajouter les étiquettes des communes sélectionnées plus haut
+mf_label(Selection_Communes, var = "NOM_COM", halo = TRUE, bg = "white", r = 0.05, cex = 0.6, pos = 3, font = 4, offset = 0.5)
+
+# Habillage de la carte
+mf_title("Nombre de transactions immobilières en Bretagne entre 2014 et 2019", cex = 0.8, tab = TRUE, fg = "white", bg = "black", line = 1, pos = "left")
+
+mf_scale()
+
+mf_arrow(pos = "topright", adj = c(-1,-3))
+
+mf_credits(txt = "          IGN et DGFip, 2021", cex = 0.5, pos = 'rightbottom')
+
+mf_legend(
+  type = "choro",
+  val = bks,
+  pal = palette,
+  title = "Nombre de\nmutations\npar maille\nde 25 ha.",
+  pos = "bottomleft",
+  size = 0.5,
+  title_cex = 0.7
+)
+ 
+par(op) # pour réinitialiser les paramètres graphiques
+```
+
+### Carte du volume des mutations sous forme de stalagmites
+
+```{r linemap stalagmites}
+#paramétrage de la fenêtre graphique
+op <- par(mar = c(0,0,1.5,0), bg = "ivory2")
+
+#Affchage de la carte en stalagmites
+linemap(nb_points,
+        k = 8,
+        col = "ivory1", 
+        border = "ivory4", 
+        lwd = 0.1)
+
+# Ajouter les étiquettes des communes sélectionnées plus haut
+mf_label(Selection_Communes, var = "NOM_COM", halo = TRUE, col = "red", bg = "white", r = 0.05, cex = 0.5, pos = 3, font = 4, offset = -1)
+
+# Habillage de la carte
+mf_title("Nombre de transactions immobilières en Bretagne (2014-2019)", cex = 0.8, tab = TRUE, fg = "white", bg = "black", line = 1, pos = "left")
+
+mf_scale()
+
+mf_arrow(pos = "topright", adj = c(-1,-3))
+
+mf_credits(txt = "          IGN et DGFip, 2021", cex = 0.5, pos = 'rightbottom')
+
+# Ajout du max comme indication en marge de la carte
+mtext(paste0("Max = ", round(max(values(nb_points), na.rm = TRUE)), " mutations\npar maille de 25 ha."), side = 1, line = -2.5, adj = 0.03, cex = 0.5)
+
+ 
+par(op) # pour réinitialiser les paramètres graphiques
+```
+
+## Cartogramme et lissage spatial
+
+### Création d'un objet correspondant aux EPCI bretons et agrégation des valeurs de l'immobilier
+
+```{r creation EPCI}
+# pour créer une couche des EPCI à partir des communes
+EPCI.BZH <- Communes %>% group_by(CODE_EPCI) %>% summarize()
+
+# pour récupérer l'id des EPCI sur chaque mutation
+DVFgeo.enrichi <- st_join(DVFgeo, EPCI.BZH["CODE_EPCI"]) |> st_drop_geometry()
+
+# pour calculer le nombre de mutations et leur prix moyen par EPCI (package data.table)
+setDT(DVFgeo.enrichi)  # Convertir le dataframe en data.table
+EPCI.enrichi <- DVFgeo.enrichi[, .(NbMutations = .N, 
+                                   prixm2moyen = round(mean(prixm2))), 
+                               by = CODE_EPCI]
+
+# jointure attributaire pour récupérer les résultats dans l'objet sf EPCI
+EPCI.BZH <- merge(EPCI.BZH, EPCI.enrichi, by = "CODE_EPCI", all = TRUE) 
+rm(DVFgeo.enrichi, EPCI.enrichi)
+```
+
+### Création d'un cartogramme avec le nombre de mutations par EPCI
+
+```{r affichage cartogramme simple}
+# pour créer un cartogramme suivant le nombre de mutations par EPCI
+EPCI.BZH.cartogram <- cartogramR(EPCI.BZH, count = "NbMutations")
+
+# Pour déplacer les noms des étiquettes (nom des quelques communes choisies) en fonction de la déformation utilisée pour construire le cartogramme
+Selection_Communes.deplacees <- warp_features(Selection_Communes, EPCI.BZH.cartogram)
+
+# Paramétrage des marges de la fenêtre pour maximiser l'emprise de la carte
+op <- par(mar = c(0, 0, 1.2, 3))
+
+# pour afficher le cartogramme
+plot(EPCI.BZH.cartogram, border = "grey95")
+
+# Ajouter les étiquettes des communes sélectionnées plus haut
+mf_label(Selection_Communes.deplacees, var = "NOM_COM", halo = TRUE, bg = "white", r = 0.05, cex = 0.7, pos = 3, font = 4, offset = 0)
+
+# ajout de la légende de déformation 
+# la fonction n'est pas encore intégrée au package. Elle est disponible dans le fichier 'add_legend.R' qui se trouve dans le répertoire de travail
+source("add_legend.R") # pour indiquer où se trouve la fonction 'add_legend.R'
+
+add_legend(EPCI.BZH.cartogram, 
+           var = "NbMutations", 
+           label.unit = "mutations", 
+           x.offset = 0.1, 
+           y.offset = 0.1, 
+           position = "bottomleft", 
+           col = "white",
+           border = "grey95")
+
+par(op) # pour réinitialiser les paramètres de la fenêtre graphique
+
+```
+
+### Cartogramme montrant le nombre de mutations et les prix au m² de l'immobilier lissés
+
+```{r deformation et carto surface lissee}
+# Calcul des seuils
+bks <- unique(mf_get_breaks(values(grille_lissee_prix_m2), breaks = "q6"))
+
+# classification de la surface lissée préalablement calculée
+cartelissee.reclass <- classify(grille_lissee_prix_m2, bks, include.lowest = TRUE, brackets = TRUE)
+
+# vectorisation de la surface reclassée
+cartelissee.vecteur <- st_as_sf(as.polygons(cartelissee.reclass))
+
+# Pour déformer la surface lissée suivant les mêmes paramètres que ceux ayant servi à construire le cartogramme
+cartelissee.vecteur.drapee <- warp_features(cartelissee.vecteur, EPCI.BZH.cartogram)
+
+# pour généraliser les contours de cartelissee.vecteur.drapee (on garde 5% des sommets initiaux)
+cartelissee.vecteur.drapee <- ms_simplify(cartelissee.vecteur.drapee, keep = 0.05, keep_shapes = TRUE)
+
+# conversion de l'objet cartogram EPCI en objet sf
+EPCI.BZH.cartogram.sf <- EPCI.BZH.cartogram$cartogram
+
+# Paramétrage des marges de la fenêtre pour maximiser l'emprise de la carte
+op <- par(mar = c(0, 0, 1.5, 0))
+
+# Affichage de tous les départements en arrière-plan, en centrant la carte sur la région Bretagne
+plot(st_geometry(departements), col = "grey90", border = NA, bg = "#B5D0D0", xlim = c(st_bbox(Communes)[1], st_bbox(Communes)[3]), ylim = c(st_bbox(Communes)[2], st_bbox(Communes)[4]))
+
+plot(cartelissee.vecteur.drapee, breaks = bks, border = NA, col = cols, add = TRUE)
+
+mf_legend(
+  type = 'choro',
+  pos = "bottomleft",
+  val = bks, 
+  pal = cols,
+  title = "Prix moyen \nau m² (Euros)",
+  val_cex = 0.5,
+  size = 0.7,
+  no_data = FALSE,
+  box_border = "white",
+  val_rnd = -1,
+)
+
+# Habillage de la carte
+mf_title("Prix au m² et mutations par EPCI en Bretagne (2014-2019)", cex = 0.8, tab = TRUE, fg = "white", bg = "black", line = 1, pos = "left")
+
+mf_credits(txt = "Sources : IGN et DGFip \nDéformation des EPCI suivant le nombre de mutations", cex = 0.3, pos = 'bottomright')
+
+plot(st_geometry(EPCI.BZH.cartogram.sf), border = "white", lwd = 1, add = TRUE)
+
+# Ajouter les étiquettes des communes sélectionnées plus haut
+mf_label(Selection_Communes, var = "NOM_COM", halo = TRUE, bg = "white", r = 0.05, cex = 0.7, pos = 3, font = 4, offset = 0)
+
+#affichage de la légende du cartogramme
+add_legend(EPCI.BZH.cartogram, 
+           var = "NbMutations", 
+           label.unit = "mutations", 
+           x.offset = 0.2, 
+           y.offset = 0.05, 
+           position = "bottomleft", 
+           col = NA,
+           border = "white")
+
+par(op) # pour réinitialiser les paramètres graphiques
+```
+
+## Elaboration d'une typologie à partir d'indicateurs immobiliers et cartographie des sous-marchés associés
+
+### Création d'un tableau avec les variables à soumettre à la CAH pour chacune des communes
+
+```{r preparation donnees pour CAH}
+CommunesDVFClassif1 <- as.data.frame(Communes) %>%
+  select(INSEE_COM, 
+         NbMutations, 
+         PrixMoyen, 
+         Prixm2Moyen)
+CommunesDVFClassif1 <- CommunesDVFClassif1 %>% na.omit()
+CommunesDVFClassif <- CommunesDVFClassif1 %>% select(NbMutations, PrixMoyen, Prixm2Moyen)
+```
+
+### Centrage et réduction des variables
+
+```{r centrage et reduction des variables}
+CommunesDVFClassifscale <- scale(CommunesDVFClassif)
+```
+
+### Classification
+
+```{r CAH}
+CAHCommunes <- agnes(CommunesDVFClassifscale,
+                     metric = "euclidean",
+                     method = "ward")
+```
+
+### Graphiques des gains d'inertie inter-classe
+
+```{r graphiques gains inertie}
+sortedHeight <- sort(CAHCommunes$height, decreasing = TRUE)
+relHeight <- sortedHeight / sum(sortedHeight) * 100
+barplot(relHeight[1:30], names.arg = seq(1, 30, 1), col = "black", border = "white", xlab = "Noeuds", ylab = "Part de l'inertie totale (%)")
+```
+
+### Arbre hiérarchique
+
+```{r arbre hierarchique}
+dendroCSP <- as.dendrogram(CAHCommunes)
+plot(dendroCSP, leaflab = "none")
+```
+
+### Partition (en n classes)
+
+```{r partionnement en classes}
+clusCSP <- cutree(CAHCommunes, k = 7)
+CommunesCluster <- as.data.frame(CommunesDVFClassif1)
+CommunesCluster$CLUSIMMO <- factor(clusCSP,
+                                   levels = 1:7,
+                                   labels = paste("Classe", 1:7))
+```
+
+### Création d'un tableau caractérisant les groupes
+
+```{r tableau synthese}
+RecapCAHRegion <- CommunesCluster %>% 
+  group_by(CLUSIMMO) %>% 
+  summarise(
+  Nbcommunes = n(), 
+  NbMutationsmoyen = round(mean(NbMutations)), 
+  Prixmoyen = round(mean(PrixMoyen)), 
+  Prixm2moyen = round(mean(Prixm2Moyen)))
+print(RecapCAHRegion)
+```
+
+### Graphique des écarts à la moyenne
+
+```{r Graphique ecarts a la moyenne}
+SyntheseCAHRegion <- RecapCAHRegion %>%
+  ungroup() %>%
+  mutate(
+    NbmutationBZH = mean(CommunesDVFClassif$NbMutations, na.rm = TRUE),
+    PrixBZH       = mean(CommunesDVFClassif$PrixMoyen, na.rm = TRUE),
+    Prixm2BZH     = mean(CommunesDVFClassif$Prixm2Moyen, na.rm = TRUE),
+    NbMutations   = (NbMutationsmoyen - NbmutationBZH) / NbmutationBZH * 100,
+    Prix          = (Prixmoyen - PrixBZH) / PrixBZH * 100,
+    Prixm2        = (Prixm2moyen - Prixm2BZH) / Prixm2BZH * 100
+  ) %>%
+  dplyr::select(CLUSIMMO, Prix, Prixm2)
+
+SyntheseLong <- tidyr::pivot_longer(SyntheseCAHRegion,
+                                    cols = c(Prix, Prixm2),
+                                    names_to = "variable",
+                                    values_to = "value")
+
+ggplot(SyntheseLong, aes(x = variable, y = value, fill = factor(CLUSIMMO))) +
+    geom_col() +
+    coord_flip() +
+    scale_fill_manual(values = c("#416979","#f9c155","#39a699","#FF4136","#FF851B","#2cb1e3","#1f78b4")) +
+    ylab("Variation à la moyenne (%)") +
+    theme_bw() +
+    theme(legend.position = "none") +
+    facet_wrap(~ CLUSIMMO, ncol = 1)
+
+```
+
+### Représentation cartographique des classes issues de la CAH
+
+```{r representation carto des classes}
+
+CommunesDVFCAH <- merge(Communes, CommunesCluster, by = "INSEE_COM")
+
+# Paramétrage des marges de la fenêtre pour maximiser l'emprise de la carte
+op <- par(mar = c(0, 0, 0.9, 0))
+
+cols <- c("#416979","#f9c155","#39a699","#FF4136","#FF851B","#2cb1e3", "#1f78b4")
+
+mf_map(
+  type = 'typo',
+  x = CommunesDVFCAH,
+  var = "CLUSIMMO",
+  pal = cols,
+  border = NA,
+  leg_pos = NA
+  )
+
+mf_legend(
+  type = 'typo',
+  pos = "bottomleft",
+  val = unique(CommunesDVFCAH$CLUSIMMO),
+  pal = cols,
+  title = "Sous-marchés",
+  val_cex = 0.35,
+  size = 0.7,
+  box_cex = c(1, 0.75),
+  box_border = "white"
+)
+
+# Ajout des départements de la région
+plot(st_geometry(depBZH), lwd = 1, col = NA, border = "#000000", add = TRUE)
+
+# Habillage de la carte
+mf_title("Sous-marchés immobiliers issus de la CAH (Bretagne)", cex = 0.8, tab = TRUE, fg = "white", bg = "black", line = 1, pos = "left")
+
+mf_scale()
+
+mf_arrow(pos = "topright", adj = c(-1,-3))
+
+mf_credits(txt = "          IGN et DGFip, 2021", cex = 0.5, pos = 'rightbottom')
+
+# Ajouter les étiquettes des communes sélectionnées plus haut
+mf_label(Selection_Communes, var = "NOM_COM", halo = TRUE, bg = "white", r = 0.05, cex = 0.7, pos = 3, font = 4, offset = 0)
+
+par(op) # pour réinitialiser les paramètres de la fenêtre graphique
+```
+
+### Export des communes contenant la typologie issue de la CAH au format geopackage
+
+```{r export commune en gpkg}
+st_write(CommunesDVFCAH, "Resultats/CommunesBZHDVF.gpkg", append = FALSE) # pour une utilisation dans un SIG par exemple
+```
